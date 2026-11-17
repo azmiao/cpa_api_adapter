@@ -45,6 +45,8 @@ plugins:
 2. 已安装时，商店会根据 GitHub 最新正式 Release 检查更新；有新版本时点击更新。安装或更新会校验发布包的 SHA-256；如界面提示需要重启，请重启 CPA 后再检查插件状态。
 3. 添加商店源和安装插件都不会自动打开全局 `plugins.enabled`。CPA 所在服务器或容器需要能够访问商店源及 GitHub Release。
 
+若安装或检查更新时遇到 GitHub API `429` 限流，请按响应的 `Retry-After` 等待；如经常遇到限流，可参考 [CPA 插件商店认证配置](https://help.router-for.me/configuration/options.html)用环境变量提供权限受限的 GitHub Token，不要把 Token 写入配置文件或提交到仓库。
+
 也可使用 CPA v8 管理 API 的 `GET /v8/management/plugins/store` 查看商店来源和更新状态，通过 `POST /v8/management/plugins/store/cpa-omp-adapter/install` 安装或更新。API 必须使用管理密钥；同 ID 存在多个来源时按商店返回的 `source_id` 指定 `?source=...`。
 
 ### 手动安装
