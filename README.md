@@ -22,12 +22,9 @@ flowchart LR
 ## 安装
 
 1. 使用支持动态插件的 CPA；本项目实际验证过 CPA **v8.0.76**。管理 API 响应头 `X-CPA-SUPPORT-PLUGIN: 1` 只表示构建支持插件，还需要在配置中启用插件。
-2. 将对应平台的动态库命名为 `cpa-omp-adapter` 并复制到 CPA 的插件目录：
-   - Linux amd64：`dist/cpa-omp-adapter.so`
-   - Windows amd64：`dist/cpa-omp-adapter.dll`
-   - 其他平台需自行构建，macOS 使用 `.dylib`。
+2. 将对应平台的动态库命名为 `cpa-omp-adapter` 并复制到 CPA 的插件目录：Linux 使用 `.so`、macOS 使用 `.dylib`、Windows 使用 `.dll`。构建产物发布后可在 [GitHub Releases](https://github.com/azmiao/cpa_omp_adapter/releases) 下载对应平台 ZIP；ZIP 根目录即为动态库，并提供 `checksums.txt` 校验。
 
-   本地 `dist/` 同时包含按 CPA 插件商店命名的 ZIP 和 `checksums.txt`；这些构建产物不加入 Git，也尚未发布到插件商店。ZIP 根目录中的动态库可直接解压使用。
+   本地构建产物位于 `dist/`，该目录不加入 Git。也可按本文末尾说明从源码构建。
 3. 在 CPA 配置中启用插件；已有配置请合并，不要覆盖其他插件：
 
    ```yaml
@@ -147,3 +144,16 @@ go build -buildvcs=false -buildmode=c-shared -o dist/cpa-omp-adapter.dll ./cmd/c
 ```
 
 动态库需与 CPA 的操作系统和架构一致。当前 Windows amd64 构建已在 CPA v8.0.76、Caddy 和 OMP v18.22.0 的隔离环境验证；两个上游账号使用本地模拟服务，并非真实 OAuth 账号。Linux amd64 构建已交叉编译，尚未在 Linux CPA 运行时验证。
+
+## 自动构建与发布
+
+推送 `main`、`feature/**` 分支、向 `main` 发起 Pull Request，或手动运行工作流时，GitHub Actions 会分别在五个平台构建并验证原生 ABI：Linux amd64/arm64、macOS amd64/arm64 和 Windows amd64。非标签构建的临时产物使用 `0.0.0` 版本，可从工作流的 Artifacts 下载，不会创建 Release。
+
+推送 `vX.Y.Z` 格式的标签会触发同样的构建，并在全部平台验证通过后创建 GitHub Release，上传五个 CPA 插件 ZIP 和 `checksums.txt`。标签版本同时写入动态库的插件元数据；例如：
+
+```sh
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+发布使用 GitHub 提供的 `GITHUB_TOKEN`；仓库需启用 Actions，并允许工作流对仓库内容进行写入。此工作流不会自动创建或推送标签。

@@ -11,6 +11,8 @@ import (
 //go:embed index.html
 var page []byte
 
+var pluginVersion = "0.1.0"
+
 type RPC struct{ Manager *Manager }
 
 type Envelope struct {
@@ -56,7 +58,7 @@ func (p *RPC) Handle(method string, request []byte) ([]byte, error) {
 		}
 		result = map[string]any{
 			"schema_version": 6,
-			"metadata":       map[string]any{"Name": "CPA OMP Adapter", "Version": "0.1.0", "Author": "azmiao", "GitHubRepository": "https://github.com/azmiao/cpa_omp_adapter", "ConfigFields": []any{}},
+			"metadata":       map[string]any{"Name": "CPA OMP Adapter", "Version": pluginVersion, "Author": "azmiao", "GitHubRepository": "https://github.com/azmiao/cpa_omp_adapter", "ConfigFields": []any{}},
 			"capabilities":   map[string]any{"management_api": true},
 		}
 	case "plugin.quiesce", "plugin.shutdown":
