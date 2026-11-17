@@ -76,8 +76,13 @@ func TestAdapterCatalogHTTPAndWebSocket(t *testing.T) {
 	}))
 	defer cpa.Close()
 
+	dir, err := os.MkdirTemp("", "omp-test-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
 	cfg := DefaultConfig()
-	cfg.SocketPath = filepath.Join(t.TempDir(), "adapter.sock")
+	cfg.SocketPath = filepath.Join(dir, "adapter.sock")
 	cfg.Upstream = cpa.URL
 	cfg.Mappings = []Model{
 		{ID: "work", Target: "account-a/gpt", DisplayName: "工作模型", ContextWindow: 12345, InputModalities: []string{"text"}},
