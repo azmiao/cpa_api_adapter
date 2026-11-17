@@ -202,6 +202,26 @@ func TestAdapterCatalogHTTPAndWebSocket(t *testing.T) {
 	if status, _ := do("POST", "/codex/responses", `{"model":"account-b/gpt"}`, "client-secret"); status != 409 {
 		t.Fatalf("collision routed: %d", status)
 	}
+	catalogResponse := (&RPC{Manager: manager}).handleManagement(managementRequest{
+		Method: http.MethodPost,
+		Path:   "/v0/management/plugins/cpa-omp-adapter/catalog",
+		Body:   []byte(`{"client_key":"client-secret"}`),
+	})
+	var catalogResult struct {
+		Models []struct {
+			ID string `json:"id"`
+		} `json:"models"`
+		Warnings []string `json:"warnings"`
+	}
+	if err := json.Unmarshal(catalogResponse.Body, &catalogResult); err != nil {
+		t.Fatal(err)
+	}
+	if catalogResponse.StatusCode != http.StatusOK || len(catalogResult.Models) != 2 || len(catalogResult.Warnings) != 1 || !strings.Contains(catalogResult.Warnings[0], "account-b/gpt") {
+		t.Fatalf("management catalog with conflict: status=%d body=%s", catalogResponse.StatusCode, catalogResponse.Body)
+	}
+	if bytes.Contains(catalogResponse.Body, []byte("client-secret")) {
+		t.Fatal("management catalog leaked the client key")
+	}
 	cfg.Mappings = []Model{{ID: "missing", Target: "account-z/gpt"}}
 	if err := manager.Configure(cfg); err != nil {
 		t.Fatal(err)
