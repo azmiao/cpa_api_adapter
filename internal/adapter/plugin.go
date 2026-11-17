@@ -11,7 +11,7 @@ import (
 //go:embed index.html
 var page []byte
 
-var pluginVersion = "0.1.0"
+var pluginVersion = "0.1.1"
 
 type RPC struct{ Manager *Manager }
 
@@ -139,9 +139,11 @@ func (p *RPC) handleManagement(req managementRequest) managementResponse {
 			}
 			return managementJSON(http.StatusBadGateway, map[string]string{"error": "获取目录失败"})
 		}
-		_, warnings, err := c.render(cfg)
-		if err != nil {
-			return managementJSON(http.StatusConflict, map[string]string{"error": err.Error()})
+		var warnings []string
+		for _, mapping := range cfg.Mappings {
+			if err := c.validateMapping(mapping); err != nil {
+				warnings = append(warnings, err.Error())
+			}
 		}
 		entries := make([]map[string]string, 0, len(c.models))
 		for _, model := range c.models {

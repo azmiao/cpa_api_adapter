@@ -19,6 +19,10 @@ flowchart LR
 
 插件仅影响适配前缀下的请求，不修改其他客户端看到的 CPA 原始模型列表。配置更新会关闭已建立的适配器 WebSocket，客户端需重连。
 
+管理中心地址 `management.html#/plugin-pages/cpa-omp-adapter/0` 中的 `#...` 是浏览器前端路由，不会发给 CPA；管理中心实际通过 iframe 加载 `/v0/resource/plugins/cpa-omp-adapter/index.html`。CPA 插件资源路由只提供 GET 页面/资源，不能直接承载普通客户端鉴权的 Responses POST、SSE 和 WebSocket；管理路由又需要管理密钥，不应把该密钥交给模型客户端。
+
+社区的 [pi-bridge](https://github.com/abix5/pi-cliproxyapi-bridge) 使用资源 GET 路由和客户端扩展获取目录及用量，[model-mapper](https://github.com/DoingDog/cpa-plugin-model-mapper) 则通过 CPA 已有推理路由做模型映射；它们都不会让 OMP 原生 Codex 的模型发现路径自动出现。可研究「OMP 扩展负责发现 + CPA 插件负责映射」来免反代，但需要在每个客户端安装扩展，并单独验证 OMP 的目录合并和鉴权行为；当前实现仍使用上述反向代理方案。
+
 ## 安装
 
 使用支持动态插件的 CPA；本项目实际验证过 CPA **v8.0.76**。管理 API 响应头 `X-CPA-SUPPORT-PLUGIN: 1` 只表示构建支持插件，还需要启用全局插件开关。
@@ -73,6 +77,10 @@ https://<原CPA地址>/v0/resource/plugins/cpa-omp-adapter/index.html
 ```
 
 输入 CPA **管理密钥**连接页面。填写插件访问 CPA 的**内部地址**、套接字路径和路由前缀并保存，再按页面中的示例配置反向代理。管理密钥仅保存在当前页面内存，刷新后需重新输入。在 OMP 使用页面显示的 Base URL 和 CPA **客户端 API Key**；不要把管理密钥或官方 OpenAI OAuth token 用作客户端密钥。
+
+在「从 CPA 获取可选模型」中填写**客户端 API Key**并获取目录后，可按名称或完整 ID 搜索、分批查看全部模型，并直接点击「添加映射」。新映射默认保留原始模型 ID；如需别名，在映射卡片中修改 OMP 可见模型 ID 并保存。存在映射冲突时，页面仍会显示 CPA 原始目录和警告，方便修正配置。
+
+页面复制会优先使用浏览器剪贴板 API；普通 HTTP 或 API 不可用时尝试浏览器的选择式复制。如果浏览器或 iframe 策略禁止两种方式，页面会选中内容并提示手动复制。公网部署仍建议使用 HTTPS。
 
 页面里的「插件已就绪」只表示本地套接字已经监听，**不代表反向代理已配置或对外地址可访问**。更改套接字路径或路由前缀后，要同步更新并重载反向代理。WebUI 只生成配置示例，不会替你修改反向代理。保存通过 CPA v8 管理 API 写入并热重载配置；若原配置是旧格式，CPA 的首次 v8 写入可能将其迁移为 v8 格式。
 
