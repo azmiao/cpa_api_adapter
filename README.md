@@ -21,29 +21,56 @@ flowchart LR
 
 ## 安装
 
-1. 使用支持动态插件的 CPA；本项目实际验证过 CPA **v8.0.76**。管理 API 响应头 `X-CPA-SUPPORT-PLUGIN: 1` 只表示构建支持插件，还需要在配置中启用插件。
-2. 将对应平台的动态库命名为 `cpa-omp-adapter` 并复制到 CPA 的插件目录：Linux 使用 `.so`、macOS 使用 `.dylib`、Windows 使用 `.dll`。构建产物发布后可在 [GitHub Releases](https://github.com/azmiao/cpa_omp_adapter/releases) 下载对应平台 ZIP；ZIP 根目录即为动态库，并提供 `checksums.txt` 校验。
+使用支持动态插件的 CPA；本项目实际验证过 CPA **v8.0.76**。管理 API 响应头 `X-CPA-SUPPORT-PLUGIN: 1` 只表示构建支持插件，还需要启用全局插件开关。
 
-   本地构建产物位于 `dist/`，该目录不加入 Git。也可按本文末尾说明从源码构建。
-3. 在 CPA 配置中启用插件；已有配置请合并，不要覆盖其他插件：
+### 通过插件商店安装和更新
 
-   ```yaml
-   plugins:
-     enabled: true
-     dir: "plugins"
-     configs:
-       cpa-omp-adapter:
-         enabled: true
-   ```
+商店源地址：
 
-4. 确保 CPA 已设置管理密钥和至少一个**客户端 API Key**，重启 CPA。通过 CPA 管理中心的「OMP 适配器」菜单打开插件，或访问：
+```text
+https://raw.githubusercontent.com/azmiao/cpa_omp_adapter/main/registry.json
+```
 
-   ```text
-   https://<原CPA地址>/v0/resource/plugins/cpa-omp-adapter/index.html
-   ```
+在 CPA 管理中心的插件商店添加该源；如果界面没有添加入口，可将它合并到 CPA 配置的 `plugins` 节点：
 
-5. 输入 CPA **管理密钥**连接页面。填写插件访问 CPA 的**内部地址**、套接字路径和路由前缀并保存，再按页面中的示例配置反向代理。管理密钥仅保存在当前页面内存，刷新后需重新输入。
-6. 在 OMP 使用页面显示的 Base URL 和 CPA **客户端 API Key**；不要把管理密钥或官方 OpenAI OAuth token 用作客户端密钥。
+```yaml
+plugins:
+  enabled: true
+  dir: "plugins"
+  store-sources:
+    - "https://raw.githubusercontent.com/azmiao/cpa_omp_adapter/main/registry.json"
+```
+
+1. 保存配置并刷新插件商店，搜索 `cpa-omp-adapter`，选择本商店源后点击安装。商店源清单必须已推送到 `main`，并且仓库已有正式 Release，才能下载安装。
+2. 已安装时，商店会根据 GitHub 最新正式 Release 检查更新；有新版本时点击更新。安装或更新会校验发布包的 SHA-256；如界面提示需要重启，请重启 CPA 后再检查插件状态。
+3. 添加商店源和安装插件都不会自动打开全局 `plugins.enabled`。CPA 所在服务器或容器需要能够访问商店源及 GitHub Release。
+
+也可使用 CPA v8 管理 API 的 `GET /v8/management/plugins/store` 查看商店来源和更新状态，通过 `POST /v8/management/plugins/store/cpa-omp-adapter/install` 安装或更新。API 必须使用管理密钥；同 ID 存在多个来源时按商店返回的 `source_id` 指定 `?source=...`。
+
+### 手动安装
+
+从 [GitHub Releases](https://github.com/azmiao/cpa_omp_adapter/releases) 下载对应平台 ZIP；ZIP 根目录即为动态库，并提供 `checksums.txt` 校验。将动态库命名为 `cpa-omp-adapter` 并复制到 CPA 的插件目录：Linux 使用 `.so`、macOS 使用 `.dylib`、Windows 使用 `.dll`。也可按本文末尾说明从源码构建；本地 `dist/` 不加入 Git。
+
+手动安装后，确保全局插件开关与该插件均已启用，然后重启 CPA。已有配置请合并，不要覆盖其他插件：
+
+```yaml
+plugins:
+  enabled: true
+  dir: "plugins"
+  configs:
+    cpa-omp-adapter:
+      enabled: true
+```
+
+### 配置适配器
+
+确保 CPA 已设置管理密钥和至少一个**客户端 API Key**。通过 CPA 管理中心的「OMP 适配器」菜单打开插件，或访问：
+
+```text
+https://<原CPA地址>/v0/resource/plugins/cpa-omp-adapter/index.html
+```
+
+输入 CPA **管理密钥**连接页面。填写插件访问 CPA 的**内部地址**、套接字路径和路由前缀并保存，再按页面中的示例配置反向代理。管理密钥仅保存在当前页面内存，刷新后需重新输入。在 OMP 使用页面显示的 Base URL 和 CPA **客户端 API Key**；不要把管理密钥或官方 OpenAI OAuth token 用作客户端密钥。
 
 页面里的「插件已就绪」只表示本地套接字已经监听，**不代表反向代理已配置或对外地址可访问**。更改套接字路径或路由前缀后，要同步更新并重载反向代理。WebUI 只生成配置示例，不会替你修改反向代理。保存通过 CPA v8 管理 API 写入并热重载配置；若原配置是旧格式，CPA 的首次 v8 写入可能将其迁移为 v8 格式。
 

@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "plugins": [
+    {
+      "id": "cpa-omp-adapter",
+      "name": "CPA OMP Adapter",
+      "description": "通过现有 CPA 地址为 oh-my-pi 提供 Codex 模型发现、模型映射和可视化配置。",
+      "author": "azmiao",
+      "version": "0.1.0",
+      "repository": "https://github.com/azmiao/cpa_omp_adapter",
+      "homepage": "https://github.com/azmiao/cpa_omp_adapter",
+      "license": "MIT",
+      "tags": ["Codex", "OMP", "Management", "Model Mapping"]
+    }
+  ]
+}
