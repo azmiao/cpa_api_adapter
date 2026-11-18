@@ -189,8 +189,9 @@ go build -buildvcs=false -buildmode=c-shared -o dist/cpa-omp-adapter.dll ./cmd/c
 推送 `vX.Y.Z` 格式的标签会触发同样的构建，并在全部平台验证通过后创建 GitHub Release，上传五个 CPA 插件 ZIP 和 `checksums.txt`。标签版本同时写入动态库的插件元数据；例如：
 
 ```sh
-git tag v0.1.0
-git push origin v0.1.0
+VERSION=0.1.2  # 替换为尚未发布的版本号
+git tag "v${VERSION}"
+git push origin "v${VERSION}"
 ```
 
 发布使用 GitHub 提供的 `GITHUB_TOKEN`；仓库需启用 Actions，并允许工作流对仓库内容进行写入。此工作流不会自动创建或推送标签。
