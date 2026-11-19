@@ -45,7 +45,7 @@ plugins:
     - "https://raw.githubusercontent.com/azmiao/cpa_omp_adapter/main/registry.json"
 ```
 
-1. 保存配置并刷新插件商店，搜索 `cpa-omp-adapter`，选择本商店源后点击安装。商店源清单必须已推送到 `main`，并且仓库已有正式 Release，才能下载安装。
+1. 在 CPA 管理中心的插件商店添加上述源地址；如果界面没有添加入口，可将它合并到 CPA 配置的 `plugins.store-sources`。保存配置并刷新插件商店，搜索 `cpa-omp-adapter`，选择本商店源后点击安装。商店源清单必须已推送到 `main`，并且仓库已有正式 Release，才能下载安装。
 2. 已安装时，商店会根据 GitHub 最新正式 Release 检查更新；有新版本时点击更新。安装或更新会校验发布包的 SHA-256；如界面提示需要重启，请重启 CPA 后再检查插件状态。
 3. 添加商店源和安装插件都不会自动打开全局 `plugins.enabled`。CPA 所在服务器或容器需要能够访问商店源及 GitHub Release。
 
@@ -162,7 +162,7 @@ reverse_proxy @omp unix//run/cpa-omp/adapter.sock
 reverse_proxy 127.0.0.1:8317
 ```
 
-Windows 路径示例：`reverse_proxy @omp "unix/C:/path/to/adapter.sock"`。WebUI 可根据当前路径生成 Caddy 或 Nginx 片段。Caddy 自动处理 WebSocket 升级；请保留 SSE 流式传输。
+Windows 路径示例：在 `handle @omp` 块内使用 `reverse_proxy "unix/C:/path/to/adapter.sock"`。WebUI 可根据当前路径生成 Caddy 或 Nginx 片段。Caddy 自动处理 WebSocket 升级；请保留 SSE 流式传输。
 
 ### Nginx
 

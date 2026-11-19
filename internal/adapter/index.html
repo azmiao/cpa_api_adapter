@@ -214,7 +214,7 @@ function address() {
   $('base-hint').textContent = '地址仅在反向代理配置完成后可用；请使用 CPA 的客户端 API Key。';
   const socket = cfg.socket_path.replace(/\\/g, '/');
   if ($('proxy-type').value === 'caddy' && !/[\r\n{}]/.test(socket)) {
-    $('proxy-snippet').textContent = `# 放在现有 CPA 的站点块中，保留原有的 CPA 转发\n@omp path ${base}/*\nreverse_proxy @omp ${JSON.stringify('unix/' + socket)}`;
+    $('proxy-snippet').textContent = `# 放在现有 CPA 的站点块中，保留原有的 CPA 转发\n@omp path ${base}/*\nhandle @omp {\n    reverse_proxy ${JSON.stringify('unix/' + socket)}\n}`;
   } else if (!socket.startsWith('/') || /[\s:;{}$#"'\\]/.test(socket)) {
     $('proxy-snippet').textContent = '此路径不能直接用于 Nginx 示例。请选择 Caddy，或参阅项目说明。';
   } else {
