@@ -53,8 +53,9 @@ func ParseConfig(data []byte) (Config, error) {
 	if len(data) != 0 {
 		wire := struct {
 			Config   `yaml:",inline"`
-			Enabled  *bool `yaml:"enabled"`
-			Priority *int  `yaml:"priority"`
+			Enabled  *bool     `yaml:"enabled"`
+			Priority *int      `yaml:"priority"`
+			Store    yaml.Node `yaml:"store"`
 		}{Config: cfg}
 		decoder := yaml.NewDecoder(bytes.NewReader(data))
 		decoder.KnownFields(true)

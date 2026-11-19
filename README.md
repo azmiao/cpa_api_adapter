@@ -222,13 +222,18 @@ CPA_API_KEY 是 OMP 使用的客户端密钥环境变量。运行 omp models ope
 go test ./internal/adapter
 CGO_ENABLED=1 go build -trimpath -buildvcs=false -buildmode=c-shared \
   -o dist/cpa-api-adapter.so ./cmd/cpa-api-adapter
-python scripts/smoke_plugin.py dist/cpa-api-adapter.so 0.2.0
-python scripts/package_release.py 0.2.0 linux_amd64 dist/cpa-api-adapter.so
+python scripts/smoke_plugin.py dist/cpa-api-adapter.so 0.2.1
+python scripts/package_release.py 0.2.1 linux_amd64 dist/cpa-api-adapter.so
 ```
 
 Windows / macOS 使用相应扩展名和平台参数。Release 工作流构建五个平台并检查 CPA 原生 ABI，随后打包、生成 checksums.txt。dist/ 中的本地构建产物不加入 Git。
 
 ## 变更记录
+
+### 0.2.1
+
+- 修复通过 CPA 插件商店安装时，宿主 `store` 元数据被严格 YAML 解析拒绝、导致注册失败的问题。插件配置仍使用严格字段校验。
+- 增加携带商店元数据的注册、重新配置和原生 ABI 回归检查。
 
 ### 0.2.0
 
