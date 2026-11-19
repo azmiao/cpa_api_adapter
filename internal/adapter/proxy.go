@@ -23,6 +23,7 @@ func (m *Manager) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	defer m.active.Done()
 	var api *APIConfig
+	matchedPrefix := -1
 	for i := range cfg.APIs {
 		candidate := &cfg.APIs[i]
 		suffix, matches := strings.CutPrefix(r.URL.Path, candidate.Prefix)
@@ -30,15 +31,22 @@ func (m *Manager) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if candidate.Format == "backend-api" {
 			formatPath = "/backend-api/"
 		}
-		if matches && strings.HasPrefix(suffix, formatPath) && (api == nil || len(candidate.Prefix) > len(api.Prefix)) {
+		if !matches || !strings.HasPrefix(suffix, formatPath) || len(candidate.Prefix) < matchedPrefix {
+			continue
+		}
+		if len(candidate.Prefix) > matchedPrefix {
+			matchedPrefix = len(candidate.Prefix)
+			api = nil
+		}
+		if authenticate(r.Header, candidate.APIKey) {
 			api = candidate
 		}
 	}
-	if api == nil {
+	if matchedPrefix < 0 {
 		http.NotFound(w, r)
 		return
 	}
-	if !authenticate(r.Header, api.APIKey) {
+	if api == nil {
 		writeError(w, &apiError{http.StatusUnauthorized, "API Key 无效或不属于此路由"})
 		return
 	}

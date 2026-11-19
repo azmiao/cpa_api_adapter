@@ -28,13 +28,12 @@ type Config struct {
 }
 
 type APIConfig struct {
-	Name          string  `json:"name" yaml:"name"`
-	APIKey        string  `json:"api_key" yaml:"api_key"`
-	Upstream      string  `json:"upstream" yaml:"upstream"`
-	Prefix        string  `json:"prefix" yaml:"prefix"`
-	Format        string  `json:"format" yaml:"format"`
-	PublicBaseURL string  `json:"public_base_url" yaml:"public_base_url"`
-	Mappings      []Model `json:"mappings" yaml:"mappings"`
+	Name     string  `json:"name" yaml:"name"`
+	APIKey   string  `json:"api_key" yaml:"api_key"`
+	Upstream string  `json:"upstream" yaml:"upstream"`
+	Prefix   string  `json:"prefix" yaml:"prefix"`
+	Format   string  `json:"format" yaml:"format"`
+	Mappings []Model `json:"mappings" yaml:"mappings"`
 }
 
 type Model struct {
@@ -92,15 +91,16 @@ func (c Config) Validate() error {
 	if c.MaxBodyMB < 1 || c.MaxBodyMB > 512 {
 		return fmt.Errorf("请求大小限制必须在 1 到 512 MB 之间")
 	}
-	keys, prefixes := map[string]bool{}, map[string]bool{}
+	identities := make(map[[3]string]bool, len(c.APIs))
 	for i, api := range c.APIs {
 		if err := api.Validate(); err != nil {
 			return fmt.Errorf("第 %d 个 API: %w", i+1, err)
 		}
-		if keys[api.APIKey] || prefixes[api.Prefix] {
-			return fmt.Errorf("第 %d 个 API 的密钥或路由前缀重复", i+1)
+		identity := [3]string{api.Prefix, api.Format, api.APIKey}
+		if identities[identity] {
+			return fmt.Errorf("第 %d 个 API 的路由前缀、出口格式和 API Key 组合重复", i+1)
 		}
-		keys[api.APIKey], prefixes[api.Prefix] = true, true
+		identities[identity] = true
 	}
 	return nil
 }
@@ -131,12 +131,6 @@ func (c APIConfig) Validate() error {
 	upstreamPath := strings.TrimRight(u.Path, "/")
 	if upstreamPath == c.Prefix || strings.HasPrefix(upstreamPath, c.Prefix+"/") {
 		return fmt.Errorf("CPA 内部地址不能指向适配路由，否则可能循环转发")
-	}
-	if c.PublicBaseURL != "" {
-		p, err := url.Parse(c.PublicBaseURL)
-		if err != nil || p.Host == "" || p.User != nil || p.RawQuery != "" || p.Fragment != "" || (p.Scheme != "http" && p.Scheme != "https") || !strings.HasSuffix(strings.TrimRight(p.Path, "/"), c.BasePath()) {
-			return fmt.Errorf("对外地址必须是以 %s 结尾的 HTTP(S) 地址", c.BasePath())
-		}
 	}
 	seen := map[string]bool{}
 	for i, m := range c.Mappings {
