@@ -367,3 +367,118 @@ func TestStoreConfigRegistrationAndReconfiguration(t *testing.T) {
 		}
 	}
 }
+
+func TestLegacyPublicBaseURLRegistrationAndReconfiguration(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/models" || r.Header.Get("Authorization") != "Bearer client-secret" {
+			http.Error(w, "unexpected request", http.StatusUnauthorized)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"models":[{"slug":"available"},{"slug":"hidden"}]}`)
+	}))
+	defer upstream.Close()
+	apis := []map[string]any{
+		{"api_key": "client-secret", "upstream": upstream.URL, "prefix": "/first", "format": "backend-api", "public_base_url": "", "mappings": []Model{{ID: "first", Target: "available"}}},
+		{"api_key": "client-secret", "upstream": upstream.URL, "prefix": "/second", "format": "backend-api", "public_base_url": "https://old.example.com/second/backend-api", "mappings": []Model{{ID: "second", Target: "available"}}},
+	}
+	dir, err := os.MkdirTemp("", "api-legacy-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+	input := map[string]any{
+		"socket_path": filepath.Join(dir, "adapter.sock"),
+		"enabled":     true,
+		"store":       map[string]any{"version": "0.4.0", "release-tag": "v0.4.0"},
+		"apis":        apis,
+	}
+	manager := NewManager()
+	defer manager.Stop()
+	rpc := &RPC{Manager: manager}
+	for _, method := range []string{"plugin.register", "plugin.reconfigure"} {
+		if method == "plugin.reconfigure" {
+			apis[0]["prefix"] = "/updated"
+		}
+		data, err := yaml.Marshal(input)
+		if err != nil {
+			t.Fatal(err)
+		}
+		request, err := json.Marshal(lifecycleRequest{ConfigYAML: data})
+		if err != nil {
+			t.Fatal(err)
+		}
+		response, err := rpc.Handle(method, request)
+		if err != nil {
+			t.Fatalf("%s with obsolete API URLs: %v", method, err)
+		}
+		var registration struct {
+			OK bool `json:"ok"`
+			Result struct {
+				Metadata     struct{ Name string } `json:"metadata"`
+				Capabilities struct {
+					ManagementAPI bool `json:"management_api"`
+				} `json:"capabilities"`
+			} `json:"result"`
+		}
+		if err := json.Unmarshal(response, &registration); err != nil || !registration.OK || registration.Result.Metadata.Name == "" || !registration.Result.Capabilities.ManagementAPI {
+			t.Fatalf("%s returned unusable registration: %s %v", method, response, err)
+		}
+		for _, api := range apis {
+			request := httptest.NewRequest(http.MethodGet, api["prefix"].(string)+"/backend-api/models", nil)
+			request.Header.Set("Authorization", "Bearer client-secret")
+			result := httptest.NewRecorder()
+			manager.ServeHTTP(result, request)
+			var catalog struct {
+				Models []struct{ Slug string } `json:"models"`
+			}
+			if err := json.Unmarshal(result.Body.Bytes(), &catalog); err != nil || result.Code != http.StatusOK || len(catalog.Models) != 1 || catalog.Models[0].Slug != api["mappings"].([]Model)[0].ID {
+				t.Fatalf("%s lost migrated API model policy: %d %s %v; listener: %s", method, result.Code, result.Body.String(), err, manager.Status().Error)
+			}
+		}
+		data, err = yaml.Marshal(manager.Status().Config)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var saved map[string]any
+		if err := yaml.Unmarshal(data, &saved); err != nil {
+			t.Fatal(err)
+		}
+		for _, api := range saved["apis"].([]any) {
+			if _, present := api.(map[string]any)["public_base_url"]; present {
+				t.Fatal("canonical configuration retains the obsolete API URL")
+			}
+		}
+		if _, err := ParseConfig(data); err != nil {
+			t.Fatalf("canonical configuration cannot be loaded: %v", err)
+		}
+	}
+}
+
+func TestLegacyPublicBaseURLKeepsStrictFieldValidation(t *testing.T) {
+	for _, location := range []string{"root", "api", "model"} {
+		t.Run(location, func(t *testing.T) {
+			model := map[string]any{"id": "visible", "target": "available"}
+			api := map[string]any{
+				"api_key": "client-secret", "upstream": "http://127.0.0.1:8317", "prefix": "/work", "format": "v1",
+				"public_base_url": "https://old.example.com/work/v1", "mappings": []map[string]any{model},
+			}
+			input := map[string]any{"apis": []map[string]any{api}}
+			switch location {
+			case "root":
+				input["public_base_url"] = "https://old.example.com"
+			case "api":
+				api["upstreem"] = "http://127.0.0.1:8317"
+			case "model":
+				model["context_windwo"] = 128000
+			}
+			data, err := yaml.Marshal(input)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := ParseConfig(data); err == nil {
+				t.Fatal("obsolete API URL migration accepted an unrelated unknown field")
+			}
+		})
+	}
+}
