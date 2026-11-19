@@ -7,6 +7,7 @@
 <style>
 :root{color-scheme:light dark;--bg:#f4f6fa;--card:#fff;--text:#182235;--muted:#5c687b;--border:#dce2ea;--accent:#315dd8;--soft:#edf3ff;--good:#087a52;--bad:#b33b35;font:15px/1.55 system-ui,-apple-system,"Segoe UI","Microsoft YaHei",sans-serif}
 *{box-sizing:border-box}[hidden]{display:none!important}body{margin:0;background:var(--bg);color:var(--text)}main{max-width:1120px;margin:auto;padding:28px 22px 60px}h1{font-size:26px;margin:0}h2{font-size:18px;margin:0}h3{font-size:15px;margin:0}header,.head,.row,.actions,.address{display:flex;align-items:center;justify-content:space-between;gap:12px}header{margin-bottom:24px}.pill{font-size:13px;border:1px solid var(--border);border-radius:24px;padding:5px 12px}.good{color:var(--good)}.bad,.danger{color:var(--bad)}button,input,select{font:inherit}button{cursor:pointer;padding:9px 14px;border:1px solid var(--border);border-radius:8px;background:var(--card);color:var(--text)}button:hover{border-color:var(--accent)}button:disabled{opacity:.5;cursor:default}button:focus-visible,input:focus,select:focus{outline:2px solid var(--accent);outline-offset:2px}.primary{background:var(--accent);border-color:var(--accent);color:#fff}input:not([type=checkbox]),select{width:100%;display:block;margin-top:6px;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:var(--card);color:var(--text)}label{display:block;font-weight:600}.card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:22px}.tabs{display:flex;gap:6px;border-bottom:1px solid var(--border);margin-bottom:20px;padding-bottom:10px}.tabs button{border-color:transparent;background:transparent}.tabs button[aria-selected=true]{color:var(--accent);background:var(--soft);font-weight:650}.layout{display:grid;grid-template-columns:230px minmax(0,1fr);gap:18px}.sidebar{align-self:start;padding:14px}.sidebar .head{margin-bottom:14px}.api-list{display:grid;gap:7px}.api-item{text-align:left;width:100%;overflow-wrap:anywhere}.api-item[aria-current=true]{border-color:var(--accent);background:var(--soft)}.api-item code{display:block;font-size:12px;color:var(--muted);margin-top:3px}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px 18px}.full{grid-column:1/-1}.head{margin-bottom:18px}.empty{padding:36px 14px;border:1px dashed var(--border);border-radius:10px;text-align:center;color:var(--muted)}.feedback{color:var(--bad);white-space:pre-wrap;margin-top:12px;min-height:24px}.feedback.good{color:var(--good)}.actions{background:var(--card);padding:12px 16px;margin-top:18px;border:1px solid var(--border);border-radius:12px}.actions span{color:var(--muted);font-size:13px}.mapping{padding:16px;border:1px solid var(--border);border-radius:10px;margin-top:14px}.mapping .head{margin-bottom:12px}.mapping .remove{padding:5px 10px}details{margin-top:16px}summary{cursor:pointer;color:var(--accent);margin-bottom:12px}fieldset{border:0;margin:0;padding:0;min-width:0}legend{font-weight:600}.checks{display:flex;flex-wrap:wrap;gap:12px;margin-top:8px}.checks label{font-weight:400}.catalog{max-height:320px;overflow:auto;margin:12px 0;border:1px solid var(--border);border-radius:9px}.catalog-row{display:flex;gap:12px;align-items:center;padding:12px;border-bottom:1px solid var(--border)}.catalog-row:last-child{border-bottom:0}.catalog-row div{flex:1;min-width:0;overflow-wrap:anywhere}.catalog-row code{display:block;font-size:12px;color:var(--muted)}.address{padding:14px;background:var(--soft);border:1px solid var(--border);border-radius:9px;margin-bottom:18px}.address code{overflow-wrap:anywhere;min-width:0}pre{white-space:pre-wrap;overflow-wrap:anywhere;padding:14px;border:1px solid var(--border);border-radius:9px;background:var(--soft);font-size:12px}.key-row{display:flex;gap:8px;align-items:center;margin-top:6px}.key-row input{margin:0}.key-row button{flex:none}#login-card{max-width:600px;margin:40px auto}#login-form .primary{margin-top:18px}.count{color:var(--muted);font-size:13px}.notice{padding:12px 14px;border-left:3px solid var(--accent);background:var(--soft);border-radius:6px;margin-top:18px}
+#listen-status{display:block;overflow-wrap:anywhere}#proxy-target-field{margin-top:14px}
 @media(max-width:720px){main{padding:20px 14px 50px}.layout,.grid{grid-template-columns:1fr}.full{grid-column:auto}.api-list{display:flex;overflow:auto}.api-item{min-width:160px}.card{padding:16px}.actions span{font-size:12px}.catalog-row{flex-wrap:wrap}.tabs{overflow:auto;white-space:nowrap}}
 @media(prefers-color-scheme:dark){:root{--bg:#111827;--card:#1c2637;--text:#e8edf6;--muted:#aab6c9;--border:#38465a;--accent:#83a6ff;--soft:#23334d;--good:#75dbad;--bad:#ff9d96}.primary{background:#416bdc;border-color:#416bdc;color:#fff}}
 </style>
@@ -38,12 +39,16 @@
 </div>
 <div id="panel-access" role="tabpanel" aria-labelledby="tab-access" hidden>
 <div class="address"><code id="base-url"></code><button id="copy-url" type="button">复制地址</button></div>
-<label>代理软件<select id="proxy-type"><option value="nginx">Nginx</option><option value="caddy">Caddy</option></select></label><pre id="proxy-snippet"></pre><button id="copy-proxy" type="button">复制配置</button><div id="copy-message" class="feedback" role="status"></div>
+<label>代理软件<select id="proxy-type"><option value="nginx">Nginx</option><option value="caddy">Caddy</option></select></label>
+<label id="proxy-target-field" hidden>代理连接地址<input id="proxy-target" autocomplete="off" placeholder="10.0.0.10:18318"></label>
+<pre id="proxy-snippet"></pre><button id="copy-proxy" type="button">复制配置</button><div id="copy-message" class="feedback" role="status"></div>
 </div>
 </section></section>
 <section id="page-settings" role="tabpanel" aria-labelledby="tab-settings" class="card" hidden><div class="head"><h2>设置</h2></div><div class="grid">
-<label class="full">本地套接字路径<input id="socket-path" required></label>
-<label>套接字权限<select id="socket-mode"><option value="0660">0660</option><option value="0600">0600</option><option value="0666">0666</option></select></label>
+<label class="full">监听方式<select id="listen-mode"><option value="unix">Unix 套接字</option><option value="tcp">TCP</option></select></label>
+<label id="tcp-settings" class="full" hidden>TCP 监听地址<input id="listen-address" autocomplete="off" placeholder="127.0.0.1:18318"></label>
+<fieldset id="unix-settings" class="grid full"><label class="full">本地套接字路径<input id="socket-path" required></label><label>套接字权限<select id="socket-mode"><option value="0660">0660</option><option value="0600">0600</option><option value="0666">0666</option></select></label></fieldset>
+<div class="full"><label>实际监听地址</label><code id="listen-status">未监听</code></div>
 <label>最大请求体（MB）<input id="max-body" type="number" min="1" max="512" step="1" required></label>
 </div><div class="notice">API Key 保存在 CPA 配置文件中；管理密钥仅保存在当前页面内存中。</div></section>
 <div id="message" class="feedback" role="status" aria-live="polite"></div>
@@ -73,7 +78,7 @@ async function api(url,options={}){
   if(!response.ok)throw new Error(data.error?.message||data.error||'请求失败（HTTP '+response.status+'）');
   return data;
 }
-function setStatus(status){$('status').textContent=status.running?'插件已就绪':'插件未就绪';$('status').className='pill '+(status.running?'good':'bad');}
+function setStatus(status){$('status').textContent=status.running?'插件已就绪':'插件未就绪';$('status').className='pill '+(status.running?'good':'bad');$('listen-status').textContent=status.running?status.listen_mode+' '+status.listen_address:'未监听';}
 function selectTab(button){
   const nav=button.parentElement;
   for(const tab of nav.querySelectorAll('[role=tab]')){
@@ -97,7 +102,7 @@ function collectMappings(){return [...$('mappings').children].map(node=>{
   return item;
 });}
 function storeActive(){if(active<0)return;Object.assign(apis[active],{name:$('api-name').value.trim(),api_key:$('api-key').value.trim(),prefix:$('api-prefix').value.trim(),upstream:$('api-upstream').value.trim().replace(/\/$/,''),format:$('api-format').value,public_base_url:$('api-public').value.trim().replace(/\/$/,''),mappings:collectMappings()});}
-function collect(){storeActive();return {socket_path:$('socket-path').value.trim(),socket_mode:$('socket-mode').value,max_body_mb:Number($('max-body').value),apis:structuredClone(apis)};}
+function collect(){storeActive();return {listen_mode:$('listen-mode').value,listen_address:$('listen-address').value.trim(),socket_path:$('socket-path').value.trim(),socket_mode:$('socket-mode').value,max_body_mb:Number($('max-body').value),apis:structuredClone(apis)};}
 function renderAPIs(){
   $('api-list').replaceChildren();apis.forEach((item,i)=>{
     const button=document.createElement('button');button.type='button';button.className='api-item';button.setAttribute('aria-current',String(i===active));
@@ -133,23 +138,40 @@ function renderCatalog(){
   }
   if(!filtered.length)$('model-list').textContent='没有匹配的模型';$('catalog-count').textContent=filtered.length+' / '+entry.models.length+' 个模型';$('show-more').hidden=filtered.length<=catalogLimit;
 }
+function proxyTarget(value){
+  const match=value.trim().match(/^(\[[0-9a-fA-F:.]+\]|[a-zA-Z0-9][a-zA-Z0-9.-]*):([0-9]+)$/);
+  if(!match||Number(match[2])<1||Number(match[2])>65535)return '';
+  try{const url=new URL('http://'+value.trim());if(['0.0.0.0','[::]','[::ffff:0:0]'].includes(url.hostname))return '';return url.hostname+':'+Number(match[2]);}catch{return '';}
+}
+function syncListenerSettings(resetTarget=false){
+  const tcp=$('listen-mode').value==='tcp';$('tcp-settings').hidden=!tcp;$('listen-address').disabled=!tcp;$('listen-address').required=tcp;$('unix-settings').hidden=tcp;$('unix-settings').disabled=tcp;$('proxy-target-field').hidden=!tcp;
+  if(resetTarget)$('proxy-target').value=proxyTarget($('listen-address').value);
+}
 function address(){
-  if(active<0)return;const item=apis[active],base=item.prefix?item.prefix+'/'+item.format:'';
-  $('base-url').textContent=base?(item.public_base_url||location.origin+base):'请填写路由前缀';
+  if(active<0)return;const item=apis[active],base=item.prefix?item.prefix+'/'+item.format:'',tcp=$('listen-mode').value==='tcp',target=proxyTarget($('proxy-target').value);
+  const baseURL=item.public_base_url||(tcp?(target?'http://'+target+base:''):location.origin+base);
+  $('base-url').textContent=base?(baseURL||'请填写对外 Base URL 或代理连接地址'):'请填写路由前缀';$('copy-url').disabled=!base||!baseURL;$('copy-proxy').disabled=true;
   const socket=$('socket-path').value.trim().replace(/\\/g,'/');
   if(!base||!/^\/(?:[\p{L}\p{N}_~.!$&'()+,;=:@-]+\/)*[\p{L}\p{N}_~.!$&'()+,;=:@-]+$/u.test(item.prefix)||/[\s;{}$#"'\\]/.test(base)){$('proxy-snippet').textContent='请填写可用于代理配置的路由前缀';return;}
-  if($('proxy-type').value==='caddy'&&!/[\r\n{}]/.test(socket))$('proxy-snippet').textContent='@adapter path '+base+'/*\nhandle @adapter {\n    reverse_proxy '+JSON.stringify('unix/'+socket)+'\n}';
-  else if(!socket.startsWith('/')||/[\s:;{}$#"'\\]/.test(socket))$('proxy-snippet').textContent='此套接字路径不适用于 Nginx 配置，请选择 Caddy';
-  else $('proxy-snippet').textContent='map $http_upgrade $adapter_connection_upgrade {\n    default upgrade;\n    \'\' close;\n}\n\nlocation ^~ '+base+'/ {\n    client_max_body_size '+Number($('max-body').value)+'m;\n    proxy_pass http://unix:'+socket+':'+base+'/;\n    proxy_http_version 1.1;\n    proxy_set_header Host $host;\n    proxy_set_header Upgrade $http_upgrade;\n    proxy_set_header Connection $adapter_connection_upgrade;\n    proxy_buffering off;\n    proxy_cache off;\n    proxy_request_buffering off;\n    proxy_read_timeout 3600s;\n    proxy_send_timeout 3600s;\n}';
+  if(tcp&&!target){$('proxy-snippet').textContent='请填写代理可访问的 IP 或主机名及端口；不能使用通配地址';return;}
+  let upstream;
+  if(tcp)upstream=target;
+  else if($('proxy-type').value==='caddy'&&!/[\r\n{}]/.test(socket))upstream='unix/'+socket;
+  else if(!socket.startsWith('/')||/[\s:;{}$#"'\\]/.test(socket)){$('proxy-snippet').textContent='此套接字路径不适用于 Nginx 配置，请选择 Caddy';return;}
+  else upstream='unix:'+socket+':'+base+'/';
+  if($('proxy-type').value==='caddy'){
+    const matcher='adapter_'+(active+1);$('proxy-snippet').textContent='@'+matcher+' path '+base+'/*\nhandle @'+matcher+' {\n    reverse_proxy '+JSON.stringify(upstream)+'\n}';
+  }else $('proxy-snippet').textContent='map $http_upgrade $adapter_connection_upgrade {\n    default upgrade;\n    \'\' close;\n}\n\nlocation ^~ '+base+'/ {\n    client_max_body_size '+Number($('max-body').value)+'m;\n    proxy_pass http://'+upstream+';\n    proxy_http_version 1.1;\n    proxy_set_header Host $host;\n    proxy_set_header Upgrade $http_upgrade;\n    proxy_set_header Connection $adapter_connection_upgrade;\n    proxy_buffering off;\n    proxy_cache off;\n    proxy_request_buffering off;\n    proxy_read_timeout 3600s;\n    proxy_send_timeout 3600s;\n}';
+  $('copy-proxy').disabled=false;
 }
-function populate(cfg){$('socket-path').value=cfg.socket_path;$('socket-mode').value=cfg.socket_mode;$('max-body').value=cfg.max_body_mb;apis=structuredClone(cfg.apis||[]);$('proxy-type').value=/^[A-Za-z]:[\\/]/.test(cfg.socket_path)?'caddy':'nginx';showAPI(apis.length?0:-1);dirty=false;$('save-state').textContent='已保存';}
+function populate(cfg){$('listen-mode').value=cfg.listen_mode||'unix';$('listen-address').value=cfg.listen_address||'127.0.0.1:18318';$('socket-path').value=cfg.socket_path;$('socket-mode').value=cfg.socket_mode;$('max-body').value=cfg.max_body_mb;apis=structuredClone(cfg.apis||[]);$('proxy-type').value=$('listen-mode').value==='unix'&&/^[A-Za-z]:[\\/]/.test(cfg.socket_path)?'caddy':'nginx';syncListenerSettings(true);showAPI(apis.length?0:-1);dirty=false;$('save-state').textContent='已保存';}
 $('login-form').addEventListener('submit',async event=>{event.preventDefault();managementKey=$('management-key').value;message('login-message','');try{const status=await api(management+'status');$('management-key').value='';populate(status.config);setStatus(status);$('login-card').hidden=true;$('app').hidden=false;if(status.error)message('message',status.error);}catch(error){managementKey='';message('login-message',error.message);}});
 $('add-api').addEventListener('click',()=>{storeActive();apis.push({name:'',api_key:'',prefix:'',upstream:'http://127.0.0.1:8317',format:'v1',public_base_url:'',mappings:[]});showAPI(apis.length-1);selectTab($('tab-config'));changed();$('api-name').focus();});
 $('remove-api').addEventListener('click',()=>{if(!confirm('删除当前 API？保存后生效。'))return;apis.splice(active,1);showAPI(apis.length?Math.min(active,apis.length-1):-1);changed();});
 $('show-key').addEventListener('click',()=>{const shown=$('api-key').type==='password';$('api-key').type=shown?'text':'password';$('show-key').textContent=shown?'隐藏':'显示';$('show-key').setAttribute('aria-pressed',String(shown));});
 $('add-model').addEventListener('click',()=>{addMapping();storeActive();changed();});
-$('app').addEventListener('input',event=>{if(event.target.id==='model-filter')return;if(event.target.id==='proxy-type'){address();return;}storeActive();changed();renderAPIs();renderCatalog();address();});
-$('app').addEventListener('change',event=>{if(event.target.tagName==='SELECT'){storeActive();if(event.target.id!=='proxy-type')changed();renderCatalog();address();}});
+$('app').addEventListener('input',event=>{if(event.target.id==='model-filter')return;if(event.target.id==='proxy-type'||event.target.id==='proxy-target'){address();return;}if(event.target.id==='listen-mode'||event.target.id==='listen-address')syncListenerSettings(true);storeActive();changed();renderAPIs();renderCatalog();address();});
+$('app').addEventListener('change',event=>{if(event.target.tagName==='SELECT'){if(event.target.id==='listen-mode')syncListenerSettings(true);storeActive();if(event.target.id!=='proxy-type')changed();renderCatalog();address();}});
 $('model-filter').addEventListener('input',()=>{catalogLimit=50;renderCatalog();});$('show-more').addEventListener('click',()=>{catalogLimit+=50;renderCatalog();});
 $('load-models').addEventListener('click',async()=>{
   storeActive();const item=apis[active],request=structuredClone(item),source=fingerprint(item),button=$('load-models');button.disabled=true;message('catalog-message','正在获取模型…',true);
@@ -165,14 +187,16 @@ async function copyElement(id){
   message('copy-message',copied?'已复制':'内容已选中，请手动复制',copied);
 }
 $('copy-url').addEventListener('click',()=>copyElement('base-url'));$('copy-proxy').addEventListener('click',()=>copyElement('proxy-snippet'));
-function normalize(cfg){return {socket_path:cfg.socket_path,socket_mode:cfg.socket_mode,max_body_mb:cfg.max_body_mb,apis:(cfg.apis||[]).map(item=>({name:item.name||'',api_key:item.api_key,upstream:item.upstream,prefix:item.prefix,format:item.format,public_base_url:item.public_base_url||'',mappings:(item.mappings||[]).map(model=>({id:model.id,target:model.target,display_name:model.display_name||'',context_window:model.context_window||0,max_context_window:model.max_context_window||0,max_tokens:model.max_tokens||0,input_modalities:model.input_modalities||[],reasoning_levels:model.reasoning_levels||[],default_reasoning:model.default_reasoning||''}))}))};}
+function normalize(cfg){return {listen_mode:cfg.listen_mode||'unix',listen_address:cfg.listen_address||'127.0.0.1:18318',socket_path:cfg.socket_path,socket_mode:cfg.socket_mode,max_body_mb:cfg.max_body_mb,apis:(cfg.apis||[]).map(item=>({name:item.name||'',api_key:item.api_key,upstream:item.upstream,prefix:item.prefix,format:item.format,public_base_url:item.public_base_url||'',mappings:(item.mappings||[]).map(model=>({id:model.id,target:model.target,display_name:model.display_name||'',context_window:model.context_window||0,max_context_window:model.max_context_window||0,max_tokens:model.max_tokens||0,input_modalities:model.input_modalities||[],reasoning_levels:model.reasoning_levels||[],default_reasoning:model.default_reasoning||''}))}))};}
 $('save').addEventListener('click',async()=>{
   const button=$('save');button.disabled=true;message('message','正在保存…',true);
   try{
     const cfg=collect(),savedRevision=revision;await api(management+'validate',{method:'POST',body:JSON.stringify(cfg)});await api(configURL,{method:'PATCH',body:JSON.stringify(cfg)});
     let last,confirmed=false;for(let i=0;i<12;i++){await new Promise(resolve=>setTimeout(resolve,500));try{last=await api(management+'status');setStatus(last);if(JSON.stringify(normalize(last.config))===JSON.stringify(normalize(cfg))){confirmed=true;break;}}catch{}}
-    if(!confirmed)throw new Error('配置已写入，尚未确认插件重新加载，请检查 CPA 日志');if(!last.running)throw new Error('配置已写入，但插件未启动：'+(last.error||'请检查套接字路径'));
-    if(revision===savedRevision){dirty=false;$('save-state').textContent='已保存';}message('message',dirty?'配置已保存；当前页面仍有未保存修改':'配置已保存',true);
+    if(!confirmed)throw new Error('配置已写入，尚未确认插件重新加载，请检查 CPA 日志');
+    if(revision===savedRevision){dirty=false;$('save-state').textContent=last.running?'已保存':'已保存，未启动';}
+    if(!last.running)throw new Error('配置已写入，但插件未启动：'+(last.error||'请检查监听地址或套接字路径'));
+    message('message',dirty?'配置已保存；当前页面仍有未保存修改':'配置已保存',true);
   }catch(error){message('message',error.message);}finally{button.disabled=false;}
 });
 window.addEventListener('beforeunload',event=>{if(dirty){event.preventDefault();event.returnValue='';}});

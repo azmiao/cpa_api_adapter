@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"net/netip"
 	"net/url"
 	"os"
 	"path"
@@ -15,11 +16,15 @@ import (
 
 const PluginID = "cpa-api-adapter"
 
+const defaultListenAddress = "127.0.0.1:18318"
+
 type Config struct {
-	SocketPath string      `json:"socket_path" yaml:"socket_path"`
-	SocketMode string      `json:"socket_mode" yaml:"socket_mode"`
-	MaxBodyMB  int         `json:"max_body_mb" yaml:"max_body_mb"`
-	APIs       []APIConfig `json:"apis" yaml:"apis"`
+	ListenMode    string      `json:"listen_mode" yaml:"listen_mode"`
+	ListenAddress string      `json:"listen_address" yaml:"listen_address"`
+	SocketPath    string      `json:"socket_path" yaml:"socket_path"`
+	SocketMode    string      `json:"socket_mode" yaml:"socket_mode"`
+	MaxBodyMB     int         `json:"max_body_mb" yaml:"max_body_mb"`
+	APIs          []APIConfig `json:"apis" yaml:"apis"`
 }
 
 type APIConfig struct {
@@ -45,7 +50,7 @@ type Model struct {
 }
 
 func DefaultConfig() Config {
-	return Config{SocketPath: filepath.Join(os.TempDir(), "cpa-api-adapter.sock"), SocketMode: "0660", MaxBodyMB: 32, APIs: []APIConfig{}}
+	return Config{ListenMode: "unix", ListenAddress: defaultListenAddress, SocketPath: filepath.Join(os.TempDir(), "cpa-api-adapter.sock"), SocketMode: "0660", MaxBodyMB: 32, APIs: []APIConfig{}}
 }
 
 func ParseConfig(data []byte) (Config, error) {
@@ -68,11 +73,21 @@ func ParseConfig(data []byte) (Config, error) {
 }
 
 func (c Config) Validate() error {
-	if !filepath.IsAbs(c.SocketPath) || strings.ContainsRune(c.SocketPath, 0) {
-		return fmt.Errorf("套接字路径必须是绝对路径")
-	}
-	if c.SocketMode != "0600" && c.SocketMode != "0660" && c.SocketMode != "0666" {
-		return fmt.Errorf("套接字权限只能是 0600、0660 或 0666")
+	switch c.ListenMode {
+	case "", "unix":
+		if !filepath.IsAbs(c.SocketPath) || strings.ContainsRune(c.SocketPath, 0) {
+			return fmt.Errorf("套接字路径必须是绝对路径")
+		}
+		if c.SocketMode != "0600" && c.SocketMode != "0660" && c.SocketMode != "0666" {
+			return fmt.Errorf("套接字权限只能是 0600、0660 或 0666")
+		}
+	case "tcp":
+		address, err := netip.ParseAddrPort(c.ListenAddress)
+		if err != nil || address.Port() == 0 || address.Addr().Zone() != "" {
+			return fmt.Errorf("TCP 监听地址必须是 IP:端口，例如 127.0.0.1:18318 或 [::1]:18318，端口范围为 1 到 65535")
+		}
+	default:
+		return fmt.Errorf("监听方式只能是 unix 或 tcp")
 	}
 	if c.MaxBodyMB < 1 || c.MaxBodyMB > 512 {
 		return fmt.Errorf("请求大小限制必须在 1 到 512 MB 之间")
@@ -88,6 +103,15 @@ func (c Config) Validate() error {
 		keys[api.APIKey], prefixes[api.Prefix] = true, true
 	}
 	return nil
+}
+
+func (c Config) listenEndpoint() (string, string) {
+	if c.ListenMode == "tcp" {
+		address, _ := netip.ParseAddrPort(c.ListenAddress)
+		address = netip.AddrPortFrom(address.Addr().Unmap(), address.Port())
+		return "tcp", address.String()
+	}
+	return "unix", c.SocketPath
 }
 
 func (c APIConfig) Validate() error {

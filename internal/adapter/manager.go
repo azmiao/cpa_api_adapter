@@ -23,15 +23,18 @@ type Manager struct {
 	active      sync.WaitGroup
 	cfg         Config
 	server      *http.Server
+	listener    net.Listener
 	lastError   string
 	generation  uint64
 	connections map[*websocket.Conn]struct{}
 }
 
 type Status struct {
-	Config  Config `json:"config"`
-	Running bool   `json:"running"`
-	Error   string `json:"error,omitempty"`
+	Config        Config `json:"config"`
+	Running       bool   `json:"running"`
+	Error         string `json:"error,omitempty"`
+	ListenMode    string `json:"listen_mode,omitempty"`
+	ListenAddress string `json:"listen_address,omitempty"`
 }
 
 func NewManager() *Manager {
@@ -41,10 +44,21 @@ func NewManager() *Manager {
 func (m *Manager) Status() Status {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return Status{Config: m.cfg, Running: m.server != nil, Error: m.lastError}
+	status := Status{Config: m.cfg, Running: m.server != nil, Error: m.lastError}
+	if m.server != nil {
+		status.ListenMode = m.cfg.ListenMode
+		status.ListenAddress = m.server.Addr
+	}
+	return status
 }
 
 func (m *Manager) Configure(cfg Config) error {
+	if cfg.ListenMode == "" {
+		cfg.ListenMode = "unix"
+	}
+	if cfg.ListenAddress == "" && cfg.ListenMode == "unix" {
+		cfg.ListenAddress = defaultListenAddress
+	}
 	if err := cfg.Validate(); err != nil {
 		m.Stop()
 		return err
@@ -58,6 +72,7 @@ func (m *Manager) Configure(cfg Config) error {
 			model.ReasoningLevels = slices.Clone(model.ReasoningLevels)
 		}
 	}
+	network, address := cfg.listenEndpoint()
 	m.lifeMu.Lock()
 	defer m.lifeMu.Unlock()
 	m.mu.Lock()
@@ -68,15 +83,16 @@ func (m *Manager) Configure(cfg Config) error {
 			delete(m.connections, conn)
 		}
 	}
-	if m.server != nil && cfg.SocketPath == m.cfg.SocketPath {
-		if cfg.SocketMode != m.cfg.SocketMode {
+	oldNetwork, oldAddress := m.cfg.listenEndpoint()
+	if m.server != nil && network == oldNetwork && address == oldAddress {
+		if network == "unix" && cfg.SocketMode != m.cfg.SocketMode {
 			if err := setSocketMode(cfg.SocketPath, cfg.SocketMode); err != nil {
-				old := m.server
-				m.server = nil
+				old, oldListener := m.server, m.listener
+				m.server, m.listener = nil, nil
 				m.cfg = cfg
 				m.lastError = "无法设置套接字权限：" + err.Error()
 				m.mu.Unlock()
-				closeServer(old)
+				closeServer(old, oldListener)
 				return nil
 			}
 		}
@@ -85,38 +101,41 @@ func (m *Manager) Configure(cfg Config) error {
 		m.mu.Unlock()
 		return nil
 	}
-	old := m.server
-	m.server = nil
-	m.cfg = cfg
-	listener, err := net.Listen("unix", cfg.SocketPath)
-	if err != nil && removeStaleSocket(cfg.SocketPath) {
-		listener, err = net.Listen("unix", cfg.SocketPath)
-	}
-	if err == nil {
-		if err = setSocketMode(cfg.SocketPath, cfg.SocketMode); err != nil {
-			_ = listener.Close()
+	old, oldListener := m.server, m.listener
+	listener, err := net.Listen(network, address)
+	if network == "unix" {
+		if err != nil && removeStaleSocket(address) {
+			listener, err = net.Listen(network, address)
+		}
+		if err == nil {
+			if err = setSocketMode(address, cfg.SocketMode); err != nil {
+				_ = listener.Close()
+			}
 		}
 	}
+	m.cfg = cfg
 	if err != nil {
-		m.lastError = fmt.Sprintf("无法创建套接字 %s：%v", cfg.SocketPath, err)
+		m.server, m.listener = nil, nil
+		m.lastError = fmt.Sprintf("无法监听 %s %s：%v", network, address, err)
 		m.mu.Unlock()
 		if old != nil {
-			closeServer(old)
+			closeServer(old, oldListener)
 		}
 		return nil
 	}
-	server := &http.Server{Handler: m, ReadHeaderTimeout: 10 * time.Second}
+	server := &http.Server{Addr: listener.Addr().String(), Handler: m, ReadHeaderTimeout: 10 * time.Second}
 	m.server = server
+	m.listener = listener
 	m.lastError = ""
 	m.mu.Unlock()
 	if old != nil {
-		closeServer(old)
+		closeServer(old, oldListener)
 	}
 	go func() {
 		if err := server.Serve(listener); err != nil && err != http.ErrServerClosed {
 			m.mu.Lock()
 			if m.server == server {
-				m.server = nil
+				m.server, m.listener = nil, nil
 				m.lastError = "监听服务已停止：" + err.Error()
 			}
 			m.mu.Unlock()
@@ -160,7 +179,10 @@ func setSocketMode(socketPath, mode string) error {
 	return os.Chmod(socketPath, permissions)
 }
 
-func closeServer(server *http.Server) {
+func closeServer(server *http.Server, listener net.Listener) {
+	if listener != nil {
+		_ = listener.Close()
+	}
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
@@ -173,14 +195,17 @@ func (m *Manager) Stop() {
 	m.lifeMu.Lock()
 	defer m.lifeMu.Unlock()
 	m.mu.Lock()
-	server := m.server
-	m.server = nil
+	server, listener := m.server, m.listener
+	m.server, m.listener = nil, nil
 	m.generation++
 	for conn := range m.connections {
 		_ = conn.Close()
 		delete(m.connections, conn)
 	}
 	m.mu.Unlock()
+	if listener != nil {
+		_ = listener.Close()
+	}
 	if server != nil {
 		_ = server.Close()
 	}
