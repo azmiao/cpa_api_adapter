@@ -73,10 +73,13 @@ def main():
 
     with tempfile.TemporaryDirectory(prefix="omp-smoke-") as directory:
         config = {
+            "enabled": True,
+            "priority": 1,
             "socket_path": str(pathlib.Path(directory) / "adapter.sock"),
             "socket_mode": "0600",
-            "upstream": "http://127.0.0.1:1",
-            "prefix": "/omp",
+            "apis": [{"name": "Smoke", "api_key": "smoke-key",
+                      "upstream": "http://127.0.0.1:1", "prefix": "/smoke",
+                      "format": "v1", "mappings": []}],
         }
         encoded = base64.b64encode(json.dumps(config).encode()).decode()
         try:
@@ -88,17 +91,17 @@ def main():
 
             status_response = invoke("management.handle", {
                 "Method": "GET",
-                "Path": "/v0/management/plugins/cpa-omp-adapter/status",
+                "Path": "/v0/management/plugins/cpa-api-adapter/status",
             })
             status = json.loads(base64.b64decode(status_response["Body"]))
             require(status_response["StatusCode"] == 200 and status.get("running"), f"listener failed: {status}")
 
             page_response = invoke("management.handle", {
                 "Method": "GET",
-                "Path": "/v0/resource/plugins/cpa-omp-adapter/index.html",
+                "Path": "/v0/resource/plugins/cpa-api-adapter/index.html",
             })
             page = base64.b64decode(page_response["Body"]).decode("utf-8")
-            require(page_response["StatusCode"] == 200 and "OMP 适配器" in page, "management page unavailable")
+            require(page_response["StatusCode"] == 200 and "API 适配器" in page, "management page unavailable")
         finally:
             invoke("plugin.shutdown", {})
             shutdown()

@@ -76,15 +76,15 @@ func TestAdapterCatalogHTTPAndWebSocket(t *testing.T) {
 	}))
 	defer cpa.Close()
 
-	dir, err := os.MkdirTemp("", "omp-test-")
+	dir, err := os.MkdirTemp("", "api-test-")
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(dir) })
-	cfg := DefaultConfig()
+	cfg := testConfig()
 	cfg.SocketPath = filepath.Join(dir, "adapter.sock")
-	cfg.Upstream = cpa.URL
-	cfg.Mappings = []Model{
+	cfg.APIs[0].Upstream = cpa.URL
+	cfg.APIs[0].Mappings = []Model{
 		{ID: "work", Target: "account-a/gpt", DisplayName: "工作模型", ContextWindow: 12345, InputModalities: []string{"text"}},
 		{ID: "personal", Target: "account-b/gpt"},
 	}
@@ -103,14 +103,14 @@ func TestAdapterCatalogHTTPAndWebSocket(t *testing.T) {
 		return (&net.Dialer{}).DialContext(ctx, "unix", cfg.SocketPath)
 	}}
 	front := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasPrefix(r.URL.Path, cfg.BasePath()+"/") {
+		if strings.HasPrefix(r.URL.Path, cfg.APIs[0].BasePath()+"/") {
 			socketProxy.ServeHTTP(w, r)
 			return
 		}
 		cpaProxy.ServeHTTP(w, r)
 	}))
 	defer front.Close()
-	base := front.URL + cfg.BasePath()
+	base := front.URL + cfg.APIs[0].BasePath()
 	client := &http.Client{Timeout: 10 * time.Second}
 	do := func(method, path, body, key string) (int, string) {
 		t.Helper()
@@ -134,7 +134,7 @@ func TestAdapterCatalogHTTPAndWebSocket(t *testing.T) {
 
 	for _, path := range []string{"/codex/models?client_version=9.9.9", "/models?client_version=9.9.9"} {
 		status, body := do("GET", path, "", "client-secret")
-		if status != 200 || !strings.Contains(body, `"slug":"account-a/gpt"`) || !strings.Contains(body, `"slug":"work"`) || !strings.Contains(body, `"display_name":"工作模型"`) || !strings.Contains(body, `"context_window":12345`) {
+		if status != 200 || strings.Contains(body, `"slug":"account-a/gpt"`) || !strings.Contains(body, `"slug":"work"`) || !strings.Contains(body, `"display_name":"工作模型"`) || !strings.Contains(body, `"context_window":12345`) {
 			t.Fatalf("catalog %s: %d %s", path, status, body)
 		}
 	}
@@ -162,7 +162,7 @@ func TestAdapterCatalogHTTPAndWebSocket(t *testing.T) {
 	}
 
 	header := http.Header{"Authorization": []string{"Bearer client-secret"}}
-	conn, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(front.URL, "http")+cfg.BasePath()+"/codex/responses", header)
+	conn, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(front.URL, "http")+cfg.APIs[0].BasePath()+"/codex/responses", header)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -188,7 +188,7 @@ func TestAdapterCatalogHTTPAndWebSocket(t *testing.T) {
 		t.Fatalf("forwarded binary websocket: %s", request)
 	}
 
-	cfg.Mappings = []Model{{ID: "account-b/gpt", Target: "account-a/gpt"}}
+	cfg.APIs[0].Mappings = []Model{{ID: "account-b/gpt", Target: "account-a/gpt"}}
 	if err := manager.Configure(cfg); err != nil {
 		t.Fatal(err)
 	}
@@ -202,10 +202,14 @@ func TestAdapterCatalogHTTPAndWebSocket(t *testing.T) {
 	if status, _ := do("POST", "/codex/responses", `{"model":"account-b/gpt"}`, "client-secret"); status != 409 {
 		t.Fatalf("collision routed: %d", status)
 	}
+	catalogInput, err := json.Marshal(cfg.APIs[0])
+	if err != nil {
+		t.Fatal(err)
+	}
 	catalogResponse := (&RPC{Manager: manager}).handleManagement(managementRequest{
 		Method: http.MethodPost,
-		Path:   "/v0/management/plugins/cpa-omp-adapter/catalog",
-		Body:   []byte(`{"client_key":"client-secret"}`),
+		Path:   "/v0/management/plugins/cpa-api-adapter/catalog",
+		Body:   catalogInput,
 	})
 	var catalogResult struct {
 		Models []struct {
@@ -222,7 +226,7 @@ func TestAdapterCatalogHTTPAndWebSocket(t *testing.T) {
 	if bytes.Contains(catalogResponse.Body, []byte("client-secret")) {
 		t.Fatal("management catalog leaked the client key")
 	}
-	cfg.Mappings = []Model{{ID: "missing", Target: "account-z/gpt"}}
+	cfg.APIs[0].Mappings = []Model{{ID: "missing", Target: "account-z/gpt"}}
 	if err := manager.Configure(cfg); err != nil {
 		t.Fatal(err)
 	}
@@ -232,18 +236,18 @@ func TestAdapterCatalogHTTPAndWebSocket(t *testing.T) {
 }
 
 func TestConfigurationRejectsUnsafeSettings(t *testing.T) {
-	cfg := DefaultConfig()
+	cfg := testConfig()
 	cfg.SocketPath = "relative.sock"
 	if err := cfg.Validate(); err == nil {
 		t.Fatal("relative socket path accepted")
 	}
-	cfg = DefaultConfig()
-	cfg.Prefix = "/"
+	cfg = testConfig()
+	cfg.APIs[0].Prefix = "/"
 	if err := cfg.Validate(); err == nil {
 		t.Fatal("root prefix accepted")
 	}
-	cfg = DefaultConfig()
-	cfg.Upstream = "http://127.0.0.1:8317/omp"
+	cfg = testConfig()
+	cfg.APIs[0].Upstream = "http://127.0.0.1:8317/work"
 	if err := cfg.Validate(); err == nil {
 		t.Fatal("adapter prefix accepted as CPA upstream")
 	}
@@ -256,9 +260,9 @@ func TestConfigurationAllowsRemoteHTTP(t *testing.T) {
 		"http://[fd00::1]:8317",
 	} {
 		t.Run(upstream, func(t *testing.T) {
-			cfg := DefaultConfig()
-			cfg.Upstream = upstream
-			cfg.PublicBaseURL = "http://example.com/omp/backend-api"
+			cfg := testConfig()
+			cfg.APIs[0].Upstream = upstream
+			cfg.APIs[0].PublicBaseURL = "http://example.com/work/backend-api"
 			data, err := json.Marshal(cfg)
 			if err != nil {
 				t.Fatal(err)
@@ -268,7 +272,7 @@ func TestConfigurationAllowsRemoteHTTP(t *testing.T) {
 			}
 			response := (&RPC{Manager: NewManager()}).handleManagement(managementRequest{
 				Method: http.MethodPost,
-				Path:   "/v0/management/plugins/cpa-omp-adapter/validate",
+				Path:   "/v0/management/plugins/cpa-api-adapter/validate",
 				Body:   data,
 			})
 			if response.StatusCode != http.StatusOK {
@@ -283,7 +287,7 @@ func TestSocketDoesNotReplaceExistingFile(t *testing.T) {
 	if err := os.WriteFile(name, []byte("keep"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	cfg := DefaultConfig()
+	cfg := testConfig()
 	cfg.SocketPath = name
 	manager := NewManager()
 	defer manager.Stop()
@@ -300,7 +304,7 @@ func TestSocketDoesNotReplaceExistingFile(t *testing.T) {
 }
 
 func TestStaleSocketRecoveryDoesNotRemoveActiveListener(t *testing.T) {
-	dir, err := os.MkdirTemp("", "omp-")
+	dir, err := os.MkdirTemp("", "api-")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -312,7 +316,7 @@ func TestStaleSocketRecoveryDoesNotRemoveActiveListener(t *testing.T) {
 		t.Fatal(err)
 	}
 	other.SetUnlinkOnClose(false)
-	cfg := DefaultConfig()
+	cfg := testConfig()
 	cfg.SocketPath = name
 	manager := NewManager()
 	defer manager.Stop()
