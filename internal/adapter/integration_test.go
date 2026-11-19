@@ -276,7 +276,6 @@ func TestConfigurationAllowsRemoteHTTP(t *testing.T) {
 		t.Run(upstream, func(t *testing.T) {
 			cfg := testConfig()
 			cfg.APIs[0].Upstream = upstream
-			cfg.APIs[0].PublicBaseURL = "http://example.com/work/backend-api"
 			data, err := json.Marshal(cfg)
 			if err != nil {
 				t.Fatal(err)

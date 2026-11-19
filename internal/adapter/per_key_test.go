@@ -121,6 +121,10 @@ func TestPerKeyStorageRoutesAndModelPolicy(t *testing.T) {
 		{Name: "A", APIKey: "a-key", Upstream: a.URL, Prefix: "/a", Format: "v1", Mappings: []Model{{ID: "shared", Target: "target-a"}}},
 		{Name: "B", APIKey: "b-key", Upstream: b.URL, Prefix: "/b", Format: "backend-api", Mappings: []Model{{ID: "shared", Target: "target-b"}}},
 		{Name: "All", APIKey: "all-key", Upstream: a.URL, Prefix: "/all", Format: "v1", Mappings: []Model{}},
+		{Name: "Shared route", APIKey: "b-key", Upstream: b.URL, Prefix: "/a", Format: "v1", Mappings: []Model{{ID: "shared-b", Target: "target-b"}}},
+		{Name: "Shared prefix", APIKey: "a-key", Upstream: a.URL, Prefix: "/a", Format: "backend-api", Mappings: []Model{{ID: "backend-shared", Target: "target-a"}}},
+		{Name: "Shared key", APIKey: "a-key", Upstream: a.URL, Prefix: "/other", Format: "v1", Mappings: []Model{{ID: "other-shared", Target: "target-a"}}},
+		{Name: "Nested route", APIKey: "b-key", Upstream: b.URL, Prefix: "/a/v1", Format: "v1", Mappings: []Model{{ID: "nested-shared", Target: "target-b"}}},
 	}
 	dir, err := os.MkdirTemp("", "api-keys-")
 	if err != nil {
@@ -164,9 +168,16 @@ func TestPerKeyStorageRoutesAndModelPolicy(t *testing.T) {
 		data, _ := io.ReadAll(resp.Body)
 		return resp.StatusCode, string(data)
 	}
-	for _, item := range []struct{ path, key, field string }{{"/a/v1/models?client_version=9", "a-key", "id"}, {"/b/backend-api/models", "b-key", "slug"}} {
+	for _, item := range []struct{ path, key, field, id string }{
+		{"/a/v1/models?client_version=9", "a-key", "id", "shared"},
+		{"/b/backend-api/models", "b-key", "slug", "shared"},
+		{"/a/v1/models", "b-key", "id", "shared-b"},
+		{"/a/backend-api/models", "a-key", "slug", "backend-shared"},
+		{"/other/v1/models", "a-key", "id", "other-shared"},
+		{"/a/v1/v1/models", "b-key", "id", "nested-shared"},
+	} {
 		status, body := do("GET", item.path, item.key, "", nil)
-		if status != 200 || !strings.Contains(body, `"`+item.field+`":"shared"`) || strings.Contains(body, "target-") || strings.Contains(body, "hidden") {
+		if status != 200 || !strings.Contains(body, `"`+item.field+`":"`+item.id+`"`) || strings.Contains(body, "target-") || strings.Contains(body, "hidden") {
 			t.Fatalf("isolated catalog: %d %s", status, body)
 		}
 	}
@@ -177,9 +188,11 @@ func TestPerKeyStorageRoutesAndModelPolicy(t *testing.T) {
 		path, key, body string
 		status          int
 	}{
-		{"/a/v1/chat/completions", "b-key", `{"model":"shared"}`, 401},
+		{"/a/v1/chat/completions", "b-key", `{"model":"shared"}`, 404},
 		{"/b/backend-api/codex/responses", "a-key", `{"model":"shared"}`, 401},
 		{"/a/v1/chat/completions", "unknown", `{"model":"shared"}`, 401},
+		{"/a/v1/v1/chat/completions", "a-key", `{"model":"shared"}`, 401},
+		{"/unknown/v1/chat/completions", "a-key", `{"model":"shared"}`, 404},
 		{"/a/v1/chat/completions", "a-key", `{"model":"target-a"}`, 404},
 		{"/a/v1/chat/completions", "a-key", `{"model":"hidden"}`, 404},
 		{"/a/v1/chat/completions", "a-key", `{}`, 400},
@@ -202,6 +215,31 @@ func TestPerKeyStorageRoutesAndModelPolicy(t *testing.T) {
 	}
 	if status, body := do("POST", "/a/v1/responses", "a-key", "application/json", []byte(`{"model":"shared","stream":true}`)); status != 200 || !strings.Contains(body, `"model":"shared"`) || !strings.Contains(body, "data: [DONE]") {
 		t.Fatalf("v1 SSE: %d %s", status, body)
+	}
+	for _, item := range []struct{ path, key, model, upstreamPath string }{
+		{"/a/v1/chat/completions", "b-key", "shared-b", "/v1/chat/completions"},
+		{"/a/backend-api/codex/responses", "a-key", "backend-shared", "/backend-api/codex/responses"},
+		{"/other/v1/chat/completions", "a-key", "other-shared", "/v1/chat/completions"},
+		{"/a/v1/v1/chat/completions", "b-key", "nested-shared", "/v1/chat/completions"},
+	} {
+		status, body := do("POST", item.path, item.key, "application/json", []byte(`{"model":"`+item.model+`"}`))
+		if status != 200 || !strings.Contains(body, `"model":"`+item.model+`"`) || !strings.Contains(body, `"path":"`+item.upstreamPath+`"`) {
+			t.Fatalf("composite API route: %d %s", status, body)
+		}
+	}
+	request, err := http.NewRequest(http.MethodGet, front.URL+"/a/v1/models", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Authorization", "Bearer a-key")
+	request.Header.Set("X-Api-Key", "b-key")
+	response, err := client.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	if response.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("conflicting keys selected a shared route: %d", response.StatusCode)
 	}
 	if status, body := do("GET", "/a/v1/models/shared", "a-key", "", nil); status != 200 || !strings.Contains(body, `"id":"shared"`) {
 		t.Fatalf("v1 model resource alias: %d %s", status, body)
@@ -247,8 +285,12 @@ func TestPerKeyConfigurationRejectsAmbiguousRoutes(t *testing.T) {
 	for _, change := range []func(*Config){
 		func(c *Config) { c.APIs[0].Prefix = "" },
 		func(c *Config) { c.APIs[0].Format = "invalid" },
-		func(c *Config) { c.APIs = append(c.APIs, c.APIs[0]); c.APIs[1].Prefix = "/other" },
-		func(c *Config) { c.APIs = append(c.APIs, c.APIs[0]); c.APIs[1].APIKey = "other-key" },
+		func(c *Config) { c.APIs = append(c.APIs, c.APIs[0]) },
+		func(c *Config) {
+			c.APIs = append(c.APIs, c.APIs[0])
+			c.APIs[1].Name = "Different name"
+			c.APIs[1].Upstream = "http://other-cpa:8317"
+		},
 	} {
 		cfg := testConfig()
 		change(&cfg)
