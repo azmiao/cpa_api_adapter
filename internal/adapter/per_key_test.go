@@ -260,3 +260,68 @@ func TestPerKeyConfigurationRejectsAmbiguousRoutes(t *testing.T) {
 		t.Fatal("old global configuration silently accepted")
 	}
 }
+
+func TestStoreConfigRegistrationAndReconfiguration(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/models" || r.Header.Get("Authorization") != "Bearer client-secret" {
+			http.Error(w, "unexpected request", http.StatusUnauthorized)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"models":[{"slug":"available"},{"slug":"hidden"}]}`)
+	}))
+	defer upstream.Close()
+	dir, err := os.MkdirTemp("", "api-store-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+	cfg := testConfig()
+	cfg.SocketPath = filepath.Join(dir, "adapter.sock")
+	cfg.APIs[0].Upstream = upstream.URL
+	manager := NewManager()
+	defer manager.Stop()
+	rpc := &RPC{Manager: manager}
+	for _, step := range []struct{ method, prefix, id, version string }{
+		{"plugin.register", "/installed", "first", "0.2.0"},
+		{"plugin.reconfigure", "/updated", "second", "0.2.1"},
+	} {
+		cfg.APIs[0].Prefix = step.prefix
+		cfg.APIs[0].Mappings = []Model{{ID: step.id, Target: "available"}}
+		data, err := yaml.Marshal(cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		data = append([]byte("enabled: true\npriority: 1\nstore:\n  version: "+step.version+"\n  release-tag: v"+step.version+"\n  repository: https://github.com/azmiao/cpa_api_adapter\n"), data...)
+		request, err := json.Marshal(lifecycleRequest{ConfigYAML: data})
+		if err != nil {
+			t.Fatal(err)
+		}
+		response, err := rpc.Handle(step.method, request)
+		if err != nil {
+			t.Fatalf("%s with store metadata: %v", step.method, err)
+		}
+		var registration struct {
+			OK     bool `json:"ok"`
+			Result struct {
+				Metadata     struct{ Name string } `json:"metadata"`
+				Capabilities struct {
+					ManagementAPI bool `json:"management_api"`
+				} `json:"capabilities"`
+			} `json:"result"`
+		}
+		if err := json.Unmarshal(response, &registration); err != nil || !registration.OK || registration.Result.Metadata.Name == "" || !registration.Result.Capabilities.ManagementAPI {
+			t.Fatalf("%s returned unusable registration: %s %v", step.method, response, err)
+		}
+		req := httptest.NewRequest(http.MethodGet, step.prefix+"/backend-api/models", nil)
+		req.Header.Set("Authorization", "Bearer client-secret")
+		result := httptest.NewRecorder()
+		manager.ServeHTTP(result, req)
+		var catalog struct {
+			Models []struct{ Slug string } `json:"models"`
+		}
+		if err := json.Unmarshal(result.Body.Bytes(), &catalog); err != nil || result.Code != http.StatusOK || len(catalog.Models) != 1 || catalog.Models[0].Slug != step.id {
+			t.Fatalf("%s did not activate configured models: %d %s %v", step.method, result.Code, result.Body.String(), err)
+		}
+	}
+}

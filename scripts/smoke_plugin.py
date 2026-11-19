@@ -75,6 +75,11 @@ def main():
         config = {
             "enabled": True,
             "priority": 1,
+            "store": {
+                "version": sys.argv[2],
+                "release-tag": "v" + sys.argv[2],
+                "repository": "https://github.com/azmiao/cpa_api_adapter",
+            },
             "socket_path": str(pathlib.Path(directory) / "adapter.sock"),
             "socket_mode": "0600",
             "apis": [{"name": "Smoke", "api_key": "smoke-key",
