@@ -61,7 +61,11 @@ func ParseConfig(data []byte) (Config, error) {
 			Priority *int      `yaml:"priority"`
 			Store    yaml.Node `yaml:"store"`
 		}{Config: cfg}
-		decoder := yaml.NewDecoder(bytes.NewReader(data))
+		normalized, err := migrateLegacyConfig(data)
+		if err != nil {
+			return Config{}, fmt.Errorf("配置解析失败，请使用 apis 保存每个 API 的配置: %w", err)
+		}
+		decoder := yaml.NewDecoder(bytes.NewReader(normalized))
 		decoder.KnownFields(true)
 		if err := decoder.Decode(&wire); err != nil {
 			return Config{}, fmt.Errorf("配置解析失败，请使用 apis 保存每个 API 的配置: %w", err)
@@ -69,6 +73,52 @@ func ParseConfig(data []byte) (Config, error) {
 		cfg = wire.Config
 	}
 	return cfg, cfg.Validate()
+}
+
+func migrateLegacyConfig(data []byte) ([]byte, error) {
+	if !bytes.Contains(data, []byte("public_base_url")) {
+		return data, nil
+	}
+	var document yaml.Node
+	if err := yaml.Unmarshal(data, &document); err != nil {
+		return nil, err
+	}
+	if len(document.Content) == 0 || document.Content[0].Kind != yaml.MappingNode {
+		return data, nil
+	}
+	root := document.Content[0]
+	migrated := false
+	for i := 0; i < len(root.Content); i += 2 {
+		if root.Content[i].Value != "apis" {
+			continue
+		}
+		apis := root.Content[i+1]
+		if apis.Kind == yaml.AliasNode {
+			apis = apis.Alias
+		}
+		if apis.Kind != yaml.SequenceNode {
+			continue
+		}
+		for _, api := range apis.Content {
+			if api.Kind == yaml.AliasNode {
+				api = api.Alias
+			}
+			if api.Kind != yaml.MappingNode {
+				continue
+			}
+			for j := 0; j < len(api.Content); j += 2 {
+				if api.Content[j].Value == "public_base_url" {
+					api.Content = append(api.Content[:j], api.Content[j+2:]...)
+					migrated = true
+					break
+				}
+			}
+		}
+	}
+	if !migrated {
+		return data, nil
+	}
+	return yaml.Marshal(&document)
 }
 
 func (c Config) Validate() error {

@@ -146,7 +146,7 @@ CPA 与 Caddy 等反代位于同一宿主机时，用共享目录连接 Unix 套
 - Base URL 自动生成：Unix 使用管理页面 Origin；TCP 使用监听地址。通配绑定使用页面主机名预览，容器映射端口、域名或 HTTPS 不同时，在客户端自行填写实际入口。
 - 保存后未就绪：检查端口占用、套接字目录及权限；修正后再次保存。请求体上限默认 32 MB，反代限制不应更小。
 - 返回 401：检查客户端 Key 是否仍存在于 CPA、是否匹配当前路由，以及反代是否保留认证头。管理密钥只用于登录页面，保存在页面内存中。
-- 从旧版升级：旧全局上游和映射需迁入 `apis`；删除已移除的 `public_base_url` 字段，更新插件 ID 为 `cpa-api-adapter`，并同步反代和客户端地址。
+- 从旧版升级：`v0.4.1` 加载时自动移除 `apis` 中废弃的 `public_base_url`，无需先手动改配置；WebUI「保存全部」后写回干净配置。旧全局上游和映射仍需迁入 `apis`。
 
 ## 构建
 
@@ -156,7 +156,7 @@ CPA 与 Caddy 等反代位于同一宿主机时，用共享目录连接 Unix 套
 go test ./internal/adapter
 CGO_ENABLED=1 go build -trimpath -buildvcs=false -buildmode=c-shared \
   -o dist/cpa-api-adapter.so ./cmd/cpa-api-adapter
-python scripts/smoke_plugin.py dist/cpa-api-adapter.so 0.4.0
+python scripts/smoke_plugin.py dist/cpa-api-adapter.so 0.4.1
 ```
 
 Windows / macOS 使用对应动态库扩展名；Release 工作流负责多平台构建与打包。
