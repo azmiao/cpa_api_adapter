@@ -91,8 +91,60 @@ CPA 内部地址支持非本机的 HTTP 和 HTTPS，例如容器网络内的 `ht
 - 默认路径为系统临时目录下的 `cpa-omp-adapter.sock`；可在 WebUI 更换，父目录必须已经存在。不同 CPA 实例应使用不同路径。
 - Linux/macOS 默认权限 `0660`。确保运行 CPA 和反向代理的账号能够访问该目录及套接字；通常应使用受保护的目录和共同用户组。WebUI 可选 `0600`、`0660` 或 `0666`；`0666` 允许所有本机用户连接，应谨慎使用。
 - Windows 使用系统文件访问控制，界面中的 Unix 权限不生效。Windows 路径可使用 `C:/.../adapter.sock`，代理也必须支持 Windows Unix 域套接字。
-- 容器部署时，CPA 与代理须共享同一套接字目录，并保证 UID/GID 和目录权限匹配。仅映射 CPA 的 TCP 端口不能让另一个容器访问该套接字。
+- 容器部署时，CPA 与代理须共享同一套接字目录，并保证 UID/GID 和目录权限匹配。仅映射 CPA 的 TCP 端口不能让另一个容器访问该套接字。默认 `/tmp` 路径只在「CPA 与代理同容器」时可直接使用；独立容器部署请按下文「容器部署」配置共享目录。
 - 插件不会覆盖普通文件或正在使用的套接字；对拒绝连接、确认已失效的套接字会尝试恢复。仍无法启动时，先检查该路径、目录权限和 CPA 日志，不要盲目删除文件。
+
+### 容器部署
+
+Docker Compose 部署时，将固定的宿主机目录同时挂载到 CPA 与代理容器。以下示例使用宿主机 `./cpa-omp` 目录，两个容器内路径统一为 `/run/cpa-omp`：
+
+```yaml
+services:
+  cli-proxy-api:
+    # 其余原有配置保持不变
+    volumes:
+      - ./config.yaml:/CLIProxyAPI/config.yaml
+      - ./auths:/root/.cli-proxy-api
+      - ./logs:/CLIProxyAPI/logs
+      - ./plugins:/CLIProxyAPI/plugins
+      - ./cpa-omp:/run/cpa-omp
+
+  nginx: # Caddy 同理
+    # 其余原有配置保持不变
+    volumes:
+      - ./cpa-omp:/run/cpa-omp:ro
+```
+
+启动前在宿主机创建目录并设置权限：
+
+```sh
+mkdir -p cpa-omp
+# 目录须对 CPA 容器进程可写、对代理 worker 进程可读。
+# 官方 CPA 镜像以 root 运行；若代理 worker 使用非 root 账号，
+# 请设置共同用户组，例如 chown -R root:<代理组> cpa-omp 后 chmod g+rx cpa-omp。
+```
+
+插件 WebUI 中的「本地套接字路径」填写：
+
+```text
+/run/cpa-omp/adapter.sock
+```
+
+代理按「反向代理」章节的示例配置，路径同为 `/run/cpa-omp/adapter.sock`。修改 Compose 后需重建相关容器（`docker compose up -d`）。
+
+注意：
+
+- 两个容器内的挂载路径可以不同（例如代理挂载到 `/cpa-socket`），只要代理配置指向自己容器内的实际路径；示例统一路径仅为便于对照。
+- 不要将整个 `/tmp` 共享给多个容器；使用专用目录，避免互相看到对方的临时文件。
+- 代理以只读方式挂载即可：连接 Unix 套接字不需要对目录写权限，但需要套接字文件本身的写权限，权限由 `socket_mode` 与 UID/GID 决定。
+- 「CPA 内部地址」指插件访问 CPA 的地址。插件运行在 CPA 进程内，默认 `http://127.0.0.1:8317` 通常可用；若 CPA 监听在其他地址或需经容器网络访问，请改为实际地址（如 `http://cli-proxy-api:8317`）。
+
+### 非容器化部署
+
+CPA 与反向代理运行在同一台宿主机时无需共享挂载，默认 `/tmp/cpa-omp-adapter.sock` 即可使用，注意两点：
+
+- 如果自行更换路径，先手动创建父目录（如 `sudo mkdir -p /run/cpa-omp`），插件不会自动创建。
+- 确保运行代理 worker 的账号（如 Nginx 的 `www-data`、Caddy 的 `caddy`）能进入目录并访问套接字。默认 `0660` 权限下，可将代理账号加入 CPA 进程的用户组，或使用受保护的专用目录并设置共同用户组。
 
 ## 反向代理
 
