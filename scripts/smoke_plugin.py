@@ -5,8 +5,11 @@ import base64
 import ctypes
 import json
 import pathlib
+import socket
 import sys
 import tempfile
+import urllib.error
+import urllib.request
 
 
 class Buffer(ctypes.Structure):
@@ -107,6 +110,34 @@ def main():
             })
             page = base64.b64decode(page_response["Body"]).decode("utf-8")
             require(page_response["StatusCode"] == 200 and "API 适配器" in page, "management page unavailable")
+
+            with socket.socket() as reservation:
+                reservation.bind(("127.0.0.1", 0))
+                port = reservation.getsockname()[1]
+            config.update(listen_mode="tcp", listen_address=f"127.0.0.1:{port}")
+            encoded = base64.b64encode(json.dumps(config).encode()).decode()
+            invoke("plugin.reconfigure", {"config_yaml": encoded})
+            status_response = invoke("management.handle", {
+                "Method": "GET",
+                "Path": "/v0/management/plugins/cpa-api-adapter/status",
+            })
+            status = json.loads(base64.b64decode(status_response["Body"]))
+            require(status.get("running") and status.get("listen_mode") == "tcp"
+                    and status.get("listen_address") == config["listen_address"], f"TCP listener failed: {status}")
+            try:
+                opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+                opener.open(f"http://127.0.0.1:{port}/smoke/v1/models", timeout=5)
+            except urllib.error.HTTPError as error:
+                with error:
+                    payload = json.load(error)
+                    require(error.code == 401 and payload.get("error", {}).get("type") == "adapter_error",
+                            f"TCP API authentication failed: {error.code} {payload}")
+            else:
+                raise RuntimeError("TCP listener accepted an unauthenticated API request")
+            invoke("plugin.quiesce", {})
+            with socket.socket() as released:
+                released.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                released.bind(("127.0.0.1", port))
         finally:
             invoke("plugin.shutdown", {})
             shutdown()

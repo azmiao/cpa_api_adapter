@@ -21,6 +21,12 @@ import (
 )
 
 func TestAdapterCatalogHTTPAndWebSocket(t *testing.T) {
+	for _, network := range []string{"unix", "tcp"} {
+		t.Run(network, func(t *testing.T) { testAdapterCatalogHTTPAndWebSocket(t, network) })
+	}
+}
+
+func testAdapterCatalogHTTPAndWebSocket(t *testing.T, network string) {
 	requests := make(chan string, 32)
 	upgrader := websocket.Upgrader{}
 	cpa := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -83,6 +89,10 @@ func TestAdapterCatalogHTTPAndWebSocket(t *testing.T) {
 	t.Cleanup(func() { _ = os.RemoveAll(dir) })
 	cfg := testConfig()
 	cfg.SocketPath = filepath.Join(dir, "adapter.sock")
+	cfg.ListenMode = network
+	if network == "tcp" {
+		cfg.ListenAddress = tcpTestAddress(t)
+	}
 	cfg.APIs[0].Upstream = cpa.URL
 	cfg.APIs[0].Mappings = []Model{
 		{ID: "work", Target: "account-a/gpt", DisplayName: "工作模型", ContextWindow: 12345, InputModalities: []string{"text"}},
@@ -98,13 +108,17 @@ func TestAdapterCatalogHTTPAndWebSocket(t *testing.T) {
 		t.Fatal(err)
 	}
 	cpaProxy := httputil.NewSingleHostReverseProxy(upstreamURL)
-	socketProxy := httputil.NewSingleHostReverseProxy(&url.URL{Scheme: "http", Host: "adapter"})
-	socketProxy.Transport = &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-		return (&net.Dialer{}).DialContext(ctx, "unix", cfg.SocketPath)
+	adapterProxy := httputil.NewSingleHostReverseProxy(&url.URL{Scheme: "http", Host: "adapter"})
+	adapterProxy.Transport = &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+		address := cfg.SocketPath
+		if network == "tcp" {
+			address = cfg.ListenAddress
+		}
+		return (&net.Dialer{}).DialContext(ctx, network, address)
 	}}
 	front := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(r.URL.Path, cfg.APIs[0].BasePath()+"/") {
-			socketProxy.ServeHTTP(w, r)
+			adapterProxy.ServeHTTP(w, r)
 			return
 		}
 		cpaProxy.ServeHTTP(w, r)
