@@ -78,6 +78,8 @@ https://<原CPA地址>/v0/resource/plugins/cpa-omp-adapter/index.html
 
 输入 CPA **管理密钥**连接页面。填写插件访问 CPA 的**内部地址**、套接字路径和路由前缀并保存，再按页面中的示例配置反向代理。管理密钥仅保存在当前页面内存，刷新后需重新输入。在 OMP 使用页面显示的 Base URL 和 CPA **客户端 API Key**；不要把管理密钥或官方 OpenAI OAuth token 用作客户端密钥。
 
+CPA 内部地址支持非本机的 HTTP 和 HTTPS，例如容器网络内的 `http://cpa:8317`；对外 Base URL 也可使用 HTTP。HTTP 不加密插件与 CPA 之间、或客户端与反向代理之间的对应链路，客户端 API Key 和请求、响应内容可能被窃听或篡改。请仅在可信网络或受保护的隧道中使用 HTTP，公网建议使用 HTTPS；管理页面的管理密钥也应通过 HTTPS 或其他安全通道传输。
+
 在「从 CPA 获取可选模型」中填写**客户端 API Key**并获取目录后，可按名称或完整 ID 搜索、分批查看全部模型，并直接点击「添加映射」。新映射默认保留原始模型 ID；如需别名，在映射卡片中修改 OMP 可见模型 ID 并保存。存在映射冲突时，页面仍会显示 CPA 原始目录和警告，方便修正配置。
 
 页面复制会优先使用浏览器剪贴板 API；普通 HTTP 或 API 不可用时尝试浏览器的选择式复制。如果浏览器或 iframe 策略禁止两种方式，页面会选中内容并提示手动复制。公网部署仍建议使用 HTTPS。
@@ -189,7 +191,7 @@ go build -buildvcs=false -buildmode=c-shared -o dist/cpa-omp-adapter.dll ./cmd/c
 推送 `vX.Y.Z` 格式的标签会触发同样的构建，并在全部平台验证通过后创建 GitHub Release，上传五个 CPA 插件 ZIP 和 `checksums.txt`。标签版本同时写入动态库的插件元数据；例如：
 
 ```sh
-VERSION=0.1.2  # 替换为尚未发布的版本号
+VERSION=0.1.4  # 替换为尚未发布的版本号
 git tag "v${VERSION}"
 git push origin "v${VERSION}"
 ```

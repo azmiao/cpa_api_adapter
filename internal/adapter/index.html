@@ -51,9 +51,9 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere;background:var(--soft);border:1p
 <div class="notice"><strong>OMP 的 Base URL</strong><div class="address"><code id="base-url"></code><button type="button" id="copy">复制</button></div><span id="base-copy-status" class="copy-feedback" role="status" aria-live="polite"></span><span class="hint" id="base-hint"></span></div>
 <div class="grid">
 <label>本地套接字路径<input id="socket-path" placeholder="/tmp/cpa-omp-adapter.sock"><small>连接反向代理与插件，不占用新的 TCP 端口。路径的父目录须已存在。</small></label>
-<label>CPA 内部地址<input id="upstream" placeholder="http://127.0.0.1:8317"><small>插件访问 CPA 的地址；非本机地址必须使用 HTTPS。</small></label>
+<label>CPA 内部地址<input id="upstream" placeholder="http://127.0.0.1:8317"><small>支持 HTTP 和 HTTPS；HTTP 会明文传输客户端密钥及请求内容，请仅在可信网络使用。</small></label>
 <label>适配路由前缀<input id="prefix" placeholder="/omp"><small>例如 /omp；修改后需要同步更新反向代理配置。</small></label>
-<label>对外 Base URL（可选）<input id="public-base" placeholder="https://example.com/omp/backend-api"><small>仅用于展示和复制；公网访问仍需配置 HTTPS 反向代理。</small></label>
+<label>对外 Base URL（可选）<input id="public-base" placeholder="https://example.com/omp/backend-api"><small>仅用于展示和复制；公网访问建议配置 HTTPS 反向代理。</small></label>
 </div>
 <details><summary>高级连接设置</summary><div class="grid" style="margin-top:12px"><label>最大请求体（MB）<input id="max-body" type="number" min="1" max="512" step="1"><small>包含上下文和图片的请求不能超过这个大小；代理也需要允许同样大小。</small></label><label>套接字权限（Linux / macOS）<select id="socket-mode" aria-label="套接字权限"><option value="0660">0660 · 所有者和同组用户（推荐）</option><option value="0600">0600 · 仅所有者</option><option value="0666">0666 · 所有本机用户</option></select><small>反向代理运行账号需要连接权限。Windows 使用文件系统访问控制。</small></label></div></details>
 <details><summary>反向代理配置示例</summary><p>修改路由前缀或套接字后，需同步修改代理配置并重载；插件不会自动更改代理配置。代理和插件必须能访问同一套接字文件。</p><label>代理软件<select id="proxy-type" aria-label="代理软件"><option value="nginx">Nginx</option><option value="caddy">Caddy</option></select></label><pre id="proxy-snippet"></pre><button type="button" id="copy-proxy">复制配置</button><span id="proxy-copy-status" class="copy-feedback" role="status" aria-live="polite"></span></details>

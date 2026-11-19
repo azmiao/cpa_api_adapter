@@ -3,7 +3,6 @@ package adapter
 import (
 	"encoding/json"
 	"fmt"
-	"net"
 	"net/url"
 	"os"
 	"path"
@@ -62,9 +61,6 @@ func (c Config) Validate() error {
 	if err != nil || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Scheme != "http" && u.Scheme != "https") {
 		return fmt.Errorf("CPA 内部地址必须是无账号、查询参数和片段的 HTTP(S) 地址")
 	}
-	if u.Scheme == "http" && !isLoopback(u.Hostname()) {
-		return fmt.Errorf("非本机 CPA 地址必须使用 HTTPS，以免泄露客户端密钥")
-	}
 	if c.Prefix == "" || c.Prefix[0] != '/' || path.Clean(c.Prefix) != c.Prefix || strings.ContainsAny(c.Prefix, "?#% \\ ") {
 		return fmt.Errorf("路由前缀必须是规范的绝对路径，例如 /omp；根路径请填 / ")
 	}
@@ -117,11 +113,6 @@ func (c Config) Validate() error {
 		}
 	}
 	return nil
-}
-
-func isLoopback(host string) bool {
-	ip := net.ParseIP(host)
-	return strings.EqualFold(host, "localhost") || ip != nil && ip.IsLoopback()
 }
 
 func (c Config) BasePath() string { return strings.TrimRight(c.Prefix, "/") + "/backend-api" }
