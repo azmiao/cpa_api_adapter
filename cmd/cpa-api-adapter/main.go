@@ -25,7 +25,7 @@ import (
 	"encoding/json"
 	"unsafe"
 
-	"cpa-omp-adapter/internal/adapter"
+	"cpa-api-adapter/internal/adapter"
 )
 
 var plugin = &adapter.RPC{Manager: adapter.NewManager()}

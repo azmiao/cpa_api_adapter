@@ -1,6 +1,7 @@
 package adapter
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/url"
@@ -12,15 +13,22 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const PluginID = "cpa-omp-adapter"
+const PluginID = "cpa-api-adapter"
 
 type Config struct {
-	SocketPath    string  `json:"socket_path" yaml:"socket_path"`
-	SocketMode    string  `json:"socket_mode" yaml:"socket_mode"`
+	SocketPath string      `json:"socket_path" yaml:"socket_path"`
+	SocketMode string      `json:"socket_mode" yaml:"socket_mode"`
+	MaxBodyMB  int         `json:"max_body_mb" yaml:"max_body_mb"`
+	APIs       []APIConfig `json:"apis" yaml:"apis"`
+}
+
+type APIConfig struct {
+	Name          string  `json:"name" yaml:"name"`
+	APIKey        string  `json:"api_key" yaml:"api_key"`
 	Upstream      string  `json:"upstream" yaml:"upstream"`
 	Prefix        string  `json:"prefix" yaml:"prefix"`
+	Format        string  `json:"format" yaml:"format"`
 	PublicBaseURL string  `json:"public_base_url" yaml:"public_base_url"`
-	MaxBodyMB     int     `json:"max_body_mb" yaml:"max_body_mb"`
 	Mappings      []Model `json:"mappings" yaml:"mappings"`
 }
 
@@ -37,15 +45,23 @@ type Model struct {
 }
 
 func DefaultConfig() Config {
-	return Config{SocketPath: filepath.Join(os.TempDir(), "cpa-omp-adapter.sock"), SocketMode: "0660", Upstream: "http://127.0.0.1:8317", Prefix: "/omp", MaxBodyMB: 32, Mappings: []Model{}}
+	return Config{SocketPath: filepath.Join(os.TempDir(), "cpa-api-adapter.sock"), SocketMode: "0660", MaxBodyMB: 32, APIs: []APIConfig{}}
 }
 
 func ParseConfig(data []byte) (Config, error) {
 	cfg := DefaultConfig()
 	if len(data) != 0 {
-		if err := yaml.Unmarshal(data, &cfg); err != nil {
-			return Config{}, fmt.Errorf("配置解析失败: %w", err)
+		wire := struct {
+			Config   `yaml:",inline"`
+			Enabled  *bool `yaml:"enabled"`
+			Priority *int  `yaml:"priority"`
+		}{Config: cfg}
+		decoder := yaml.NewDecoder(bytes.NewReader(data))
+		decoder.KnownFields(true)
+		if err := decoder.Decode(&wire); err != nil {
+			return Config{}, fmt.Errorf("配置解析失败，请使用 apis 保存每个 API 的配置: %w", err)
 		}
+		cfg = wire.Config
 	}
 	return cfg, cfg.Validate()
 }
@@ -57,27 +73,45 @@ func (c Config) Validate() error {
 	if c.SocketMode != "0600" && c.SocketMode != "0660" && c.SocketMode != "0666" {
 		return fmt.Errorf("套接字权限只能是 0600、0660 或 0666")
 	}
+	if c.MaxBodyMB < 1 || c.MaxBodyMB > 512 {
+		return fmt.Errorf("请求大小限制必须在 1 到 512 MB 之间")
+	}
+	keys, prefixes := map[string]bool{}, map[string]bool{}
+	for i, api := range c.APIs {
+		if err := api.Validate(); err != nil {
+			return fmt.Errorf("第 %d 个 API: %w", i+1, err)
+		}
+		if keys[api.APIKey] || prefixes[api.Prefix] {
+			return fmt.Errorf("第 %d 个 API 的密钥或路由前缀重复", i+1)
+		}
+		keys[api.APIKey], prefixes[api.Prefix] = true, true
+	}
+	return nil
+}
+
+func (c APIConfig) Validate() error {
+	if c.APIKey == "" || strings.ContainsAny(c.APIKey, " \r\n\t") {
+		return fmt.Errorf("API Key 必填且不能包含空白")
+	}
 	u, err := url.Parse(c.Upstream)
 	if err != nil || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Scheme != "http" && u.Scheme != "https") {
 		return fmt.Errorf("CPA 内部地址必须是无账号、查询参数和片段的 HTTP(S) 地址")
 	}
-	if c.Prefix == "" || c.Prefix[0] != '/' || path.Clean(c.Prefix) != c.Prefix || strings.ContainsAny(c.Prefix, "?#% \\ ") {
-		return fmt.Errorf("路由前缀必须是规范的绝对路径，例如 /omp；根路径请填 / ")
+	if c.Prefix == "" || c.Prefix[0] != '/' || c.Prefix == "/" || path.Clean(c.Prefix) != c.Prefix || strings.ContainsAny(c.Prefix, "?#% \\\r\n\t") {
+		return fmt.Errorf("路由前缀必填，必须是非根的规范绝对路径，例如 /work")
 	}
-	if c.Prefix == "/" {
-		return fmt.Errorf("请设置非根路由前缀，例如 /omp，避免与 CPA 原有路由冲突")
+	if c.Format != "v1" && c.Format != "backend-api" {
+		return fmt.Errorf("出口格式只能是 v1 或 backend-api")
 	}
-	if strings.TrimRight(u.Path, "/") == c.Prefix {
-		return fmt.Errorf("CPA 内部地址不能指向适配路由前缀，否则可能产生循环转发")
+	upstreamPath := strings.TrimRight(u.Path, "/")
+	if upstreamPath == c.Prefix || strings.HasPrefix(upstreamPath, c.Prefix+"/") {
+		return fmt.Errorf("CPA 内部地址不能指向适配路由，否则可能循环转发")
 	}
 	if c.PublicBaseURL != "" {
 		p, err := url.Parse(c.PublicBaseURL)
-		if err != nil || p.Host == "" || p.User != nil || p.RawQuery != "" || p.Fragment != "" || (p.Scheme != "http" && p.Scheme != "https") || !strings.HasSuffix(strings.TrimRight(p.Path, "/"), "/backend-api") {
-			return fmt.Errorf("对外地址必须是以 /backend-api 结尾的 HTTP(S) 地址")
+		if err != nil || p.Host == "" || p.User != nil || p.RawQuery != "" || p.Fragment != "" || (p.Scheme != "http" && p.Scheme != "https") || !strings.HasSuffix(strings.TrimRight(p.Path, "/"), c.BasePath()) {
+			return fmt.Errorf("对外地址必须是以 %s 结尾的 HTTP(S) 地址", c.BasePath())
 		}
-	}
-	if c.MaxBodyMB < 1 || c.MaxBodyMB > 512 {
-		return fmt.Errorf("请求大小限制必须在 1 到 512 MB 之间")
 	}
 	seen := map[string]bool{}
 	for i, m := range c.Mappings {
@@ -115,9 +149,9 @@ func (c Config) Validate() error {
 	return nil
 }
 
-func (c Config) BasePath() string { return strings.TrimRight(c.Prefix, "/") + "/backend-api" }
+func (c APIConfig) BasePath() string { return c.Prefix + "/" + c.Format }
 
-func (c Config) Mapping(id string) (Model, bool) {
+func (c APIConfig) Mapping(id string) (Model, bool) {
 	for _, m := range c.Mappings {
 		if m.ID == id {
 			return m, true

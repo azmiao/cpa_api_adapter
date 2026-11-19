@@ -9,6 +9,7 @@ import (
 	"os"
 	"reflect"
 	"runtime"
+	"slices"
 	"sync"
 	"syscall"
 	"time"
@@ -47,6 +48,15 @@ func (m *Manager) Configure(cfg Config) error {
 	if err := cfg.Validate(); err != nil {
 		m.Stop()
 		return err
+	}
+	cfg.APIs = slices.Clone(cfg.APIs)
+	for i := range cfg.APIs {
+		cfg.APIs[i].Mappings = slices.Clone(cfg.APIs[i].Mappings)
+		for j := range cfg.APIs[i].Mappings {
+			model := &cfg.APIs[i].Mappings[j]
+			model.InputModalities = slices.Clone(model.InputModalities)
+			model.ReasoningLevels = slices.Clone(model.ReasoningLevels)
+		}
 	}
 	m.lifeMu.Lock()
 	defer m.lifeMu.Unlock()

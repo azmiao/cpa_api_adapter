@@ -47,12 +47,18 @@ func (t *wsTurns) restore(data []byte) []byte {
 	return data
 }
 
-func (m *Manager) proxyWebSocket(w http.ResponseWriter, r *http.Request, cfg Config, generation uint64) {
+func (t *wsTurns) canContinue() bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.last.ID != ""
+}
+
+func (m *Manager) proxyWebSocket(w http.ResponseWriter, r *http.Request, cfg Config, api APIConfig, generation uint64) {
 	if !websocket.IsWebSocketUpgrade(r) {
 		writeError(w, &apiError{http.StatusBadRequest, "此接口需要 WebSocket 升级"})
 		return
 	}
-	u := targetURL(cfg, "/backend-api/codex/responses", r.URL.RawQuery)
+	u := targetURL(api, "/"+api.Format+r.URL.Path[len(api.Prefix)+len(api.Format)+1:], r.URL.RawQuery)
 	if u.Scheme == "https" {
 		u.Scheme = "wss"
 	} else {
@@ -131,8 +137,11 @@ func (m *Manager) proxyWebSocket(w http.ResponseWriter, r *http.Request, cfg Con
 				Model json.RawMessage `json:"model"`
 			}
 			_ = json.Unmarshal(data, &event)
-			if event.Type == "response.create" || event.Type == "response.append" {
-				updated, mapping, _, err := rewriteRequest(r, cfg, data)
+			if event.Type == "response.create" || event.Type == "response.append" || len(event.Model) > 0 {
+				updated, mapping, err := data, Model{}, error(nil)
+				if len(event.Model) > 0 || !turns.canContinue() {
+					updated, mapping, _, err = rewriteRequest(r, api, data)
+				}
 				if err != nil {
 					clientWrite.Lock()
 					writeErr := client.WriteMessage(websocket.TextMessage, mappingErrorEvent(err))

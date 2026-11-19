@@ -3,405 +3,178 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>OMP 适配器</title>
+<title>API 适配器</title>
 <style>
-:root{color-scheme:light dark;--bg:#f4f6fa;--card:#fff;--text:#182235;--muted:#5c687b;--border:#dce2ea;--accent:#315dd8;--soft:#edf3ff;--good:#087a52;--bad:#b33b35;--warn:#855500;--shadow:0 10px 30px #1b2c4510;font:15px/1.55 system-ui,-apple-system,"Segoe UI","Microsoft YaHei",sans-serif}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text)}main{max-width:1000px;margin:auto;padding:32px 22px 70px}h1{font-size:27px;letter-spacing:-.03em;margin:0}h2{font-size:18px;margin:0 0 3px}h3{font-size:16px;margin:0}p{margin:6px 0;color:var(--muted)}header{display:flex;justify-content:space-between;gap:18px;align-items:center;margin-bottom:24px}.eyebrow{font-size:12px;letter-spacing:.08em;color:var(--accent);font-weight:700}.pill{border:1px solid var(--border);padding:5px 11px;border-radius:999px;font-size:13px;white-space:nowrap}.pill.ok{color:var(--good);border-color:var(--good)}.pill.bad{color:var(--bad);border-color:var(--bad)}.card{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:22px;margin:16px 0;box-shadow:var(--shadow)}.card-head{display:flex;gap:16px;align-items:start;justify-content:space-between;margin-bottom:16px}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:15px 18px}.full{grid-column:1/-1}label{display:block;font-weight:650}label small,.hint{display:block;color:var(--muted);font-weight:400;font-size:13px;margin-top:4px}input,select,button{font:inherit}input:not([type=checkbox]),select{display:block;width:100%;margin-top:6px;padding:10px 11px;border:1px solid var(--border);border-radius:9px;background:var(--card);color:var(--text);outline:none}input:focus,select:focus,button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}button{border:1px solid var(--border);border-radius:9px;padding:9px 14px;background:var(--card);color:var(--text);font-weight:650;cursor:pointer}button:hover{border-color:var(--accent)}button:disabled{opacity:.55;cursor:wait}.primary{background:var(--accent);border-color:var(--accent);color:#fff}.danger{color:var(--bad)}.row{display:flex;align-items:end;gap:10px}.row>*:first-child{flex:1}.notice{border:1px solid var(--border);border-left:3px solid var(--accent);background:var(--soft);border-radius:9px;padding:12px 14px;color:var(--text);margin:14px 0}.notice.warn{border-left-color:var(--warn)}.notice.error{border-left-color:var(--bad)}.address{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.address code{flex:1;min-width:0;overflow-wrap:anywhere;font-size:14px}.mapping{border:1px solid var(--border);border-radius:12px;padding:16px;margin:12px 0}.mapping-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}.mapping-head button{padding:5px 10px}.empty{border:1px dashed var(--border);border-radius:12px;text-align:center;padding:24px;color:var(--muted)}details{margin-top:14px;border-top:1px solid var(--border);padding-top:12px}summary{cursor:pointer;color:var(--accent);font-weight:650}fieldset{border:0;padding:0;margin:0}legend{font-weight:650}.checks{display:flex;gap:12px;flex-wrap:wrap;margin:8px 0}.checks label{font-weight:400}.actions{position:sticky;bottom:12px;display:flex;gap:12px;align-items:center;justify-content:flex-end;background:var(--card);border:1px solid var(--border);border-radius:12px;padding:12px;box-shadow:var(--shadow)}.actions span{flex:1;color:var(--muted);font-size:13px}.feedback{min-height:24px;color:var(--bad);white-space:pre-wrap}.good{color:var(--good)}[hidden]{display:none!important}@media(max-width:640px){main{padding:22px 14px 60px}header{align-items:start;flex-direction:column}.card{padding:17px}.grid{grid-template-columns:1fr}.full{grid-column:auto}.card-head{flex-wrap:wrap}.row{align-items:stretch;flex-direction:column}.actions{bottom:4px}.actions span{display:none}}@media(prefers-color-scheme:dark){:root{--bg:#111827;--card:#1c2637;--text:#e8edf6;--muted:#aab6c9;--border:#38465a;--accent:#83a6ff;--soft:#23334d;--good:#75dbad;--bad:#ff9d96;--warn:#ffd285;--shadow:none}.primary{background:#416bdc;color:#fff;border-color:#416bdc}}
-pre{white-space:pre-wrap;overflow-wrap:anywhere;background:var(--soft);border:1px solid var(--border);border-radius:9px;padding:14px;font-size:12px}code{font-family:ui-monospace,Consolas,monospace}
-.select-control{position:relative;margin-top:6px}
-.select-trigger{width:100%;display:flex;align-items:center;justify-content:space-between;gap:12px;text-align:left;padding:10px 12px;font-weight:400}
-.select-trigger::after{content:"";width:7px;height:7px;flex:none;border-right:1.5px solid var(--muted);border-bottom:1.5px solid var(--muted);transform:rotate(45deg) translateY(-2px)}
-.select-trigger[aria-expanded="true"]{border-color:var(--accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 14%,transparent)}
-.select-menu{position:absolute;z-index:20;top:calc(100% + 5px);left:0;right:0;margin:0;padding:5px;list-style:none;max-height:240px;overflow:auto;border:1px solid var(--border);border-radius:11px;background:var(--card);box-shadow:0 12px 30px #0d1b3340}
-.select-control.open-up .select-menu{top:auto;bottom:calc(100% + 5px)}
-.select-option{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 10px;border-radius:7px;cursor:pointer;font-weight:400;outline:none}
-.select-option:hover,.select-option:focus{background:var(--soft);color:var(--text)}
-.select-option[aria-selected="true"]{color:var(--accent);font-weight:650}
-.select-option[aria-selected="true"]::after{content:"";width:8px;height:5px;flex:none;border-left:2px solid currentColor;border-bottom:2px solid currentColor;transform:rotate(-45deg)}
-.catalog-results{margin-top:16px}
-.catalog-toolbar{display:flex;align-items:end;gap:14px;margin-bottom:10px}
-.catalog-toolbar label{flex:1;min-width:0}
-.catalog-count{font-size:13px;color:var(--muted);white-space:nowrap}
-.catalog-list{max-height:370px;overflow:auto;border:1px solid var(--border);border-radius:11px}
-.catalog-item{display:flex;align-items:center;gap:14px;padding:12px;border-bottom:1px solid var(--border)}
-.catalog-item:last-child{border-bottom:0}
-.catalog-item-info{min-width:0;flex:1}
-.catalog-item-name{font-weight:650;overflow-wrap:anywhere}
-.catalog-item-id{display:block;margin-top:2px;color:var(--muted);font-size:13px;overflow-wrap:anywhere}
-.catalog-item button{flex:none;padding:7px 11px}
-.catalog-duplicate{color:var(--warn);font-size:13px}
-.catalog-more{margin-top:10px}
-@media(max-width:640px){.catalog-toolbar{align-items:stretch;flex-direction:column;gap:5px}.catalog-item{align-items:flex-start;flex-wrap:wrap}.catalog-item-info{flex-basis:100%}}
-.copy-feedback{display:block;margin-top:6px;color:var(--bad);font-size:13px}
-.copy-feedback.good{color:var(--good)}
-.copy-feedback:empty{display:none}
+:root{color-scheme:light dark;--bg:#f4f6fa;--card:#fff;--text:#182235;--muted:#5c687b;--border:#dce2ea;--accent:#315dd8;--soft:#edf3ff;--good:#087a52;--bad:#b33b35;font:15px/1.55 system-ui,-apple-system,"Segoe UI","Microsoft YaHei",sans-serif}
+*{box-sizing:border-box}[hidden]{display:none!important}body{margin:0;background:var(--bg);color:var(--text)}main{max-width:1120px;margin:auto;padding:28px 22px 60px}h1{font-size:26px;margin:0}h2{font-size:18px;margin:0}h3{font-size:15px;margin:0}header,.head,.row,.actions,.address{display:flex;align-items:center;justify-content:space-between;gap:12px}header{margin-bottom:24px}.pill{font-size:13px;border:1px solid var(--border);border-radius:24px;padding:5px 12px}.good{color:var(--good)}.bad,.danger{color:var(--bad)}button,input,select{font:inherit}button{cursor:pointer;padding:9px 14px;border:1px solid var(--border);border-radius:8px;background:var(--card);color:var(--text)}button:hover{border-color:var(--accent)}button:disabled{opacity:.5;cursor:default}button:focus-visible,input:focus,select:focus{outline:2px solid var(--accent);outline-offset:2px}.primary{background:var(--accent);border-color:var(--accent);color:#fff}input:not([type=checkbox]),select{width:100%;display:block;margin-top:6px;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:var(--card);color:var(--text)}label{display:block;font-weight:600}.card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:22px}.tabs{display:flex;gap:6px;border-bottom:1px solid var(--border);margin-bottom:20px;padding-bottom:10px}.tabs button{border-color:transparent;background:transparent}.tabs button[aria-selected=true]{color:var(--accent);background:var(--soft);font-weight:650}.layout{display:grid;grid-template-columns:230px minmax(0,1fr);gap:18px}.sidebar{align-self:start;padding:14px}.sidebar .head{margin-bottom:14px}.api-list{display:grid;gap:7px}.api-item{text-align:left;width:100%;overflow-wrap:anywhere}.api-item[aria-current=true]{border-color:var(--accent);background:var(--soft)}.api-item code{display:block;font-size:12px;color:var(--muted);margin-top:3px}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px 18px}.full{grid-column:1/-1}.head{margin-bottom:18px}.empty{padding:36px 14px;border:1px dashed var(--border);border-radius:10px;text-align:center;color:var(--muted)}.feedback{color:var(--bad);white-space:pre-wrap;margin-top:12px;min-height:24px}.feedback.good{color:var(--good)}.actions{background:var(--card);padding:12px 16px;margin-top:18px;border:1px solid var(--border);border-radius:12px}.actions span{color:var(--muted);font-size:13px}.mapping{padding:16px;border:1px solid var(--border);border-radius:10px;margin-top:14px}.mapping .head{margin-bottom:12px}.mapping .remove{padding:5px 10px}details{margin-top:16px}summary{cursor:pointer;color:var(--accent);margin-bottom:12px}fieldset{border:0;margin:0;padding:0;min-width:0}legend{font-weight:600}.checks{display:flex;flex-wrap:wrap;gap:12px;margin-top:8px}.checks label{font-weight:400}.catalog{max-height:320px;overflow:auto;margin:12px 0;border:1px solid var(--border);border-radius:9px}.catalog-row{display:flex;gap:12px;align-items:center;padding:12px;border-bottom:1px solid var(--border)}.catalog-row:last-child{border-bottom:0}.catalog-row div{flex:1;min-width:0;overflow-wrap:anywhere}.catalog-row code{display:block;font-size:12px;color:var(--muted)}.address{padding:14px;background:var(--soft);border:1px solid var(--border);border-radius:9px;margin-bottom:18px}.address code{overflow-wrap:anywhere;min-width:0}pre{white-space:pre-wrap;overflow-wrap:anywhere;padding:14px;border:1px solid var(--border);border-radius:9px;background:var(--soft);font-size:12px}.key-row{display:flex;gap:8px;align-items:center;margin-top:6px}.key-row input{margin:0}.key-row button{flex:none}#login-card{max-width:600px;margin:40px auto}#login-form .primary{margin-top:18px}.count{color:var(--muted);font-size:13px}.notice{padding:12px 14px;border-left:3px solid var(--accent);background:var(--soft);border-radius:6px;margin-top:18px}
+@media(max-width:720px){main{padding:20px 14px 50px}.layout,.grid{grid-template-columns:1fr}.full{grid-column:auto}.api-list{display:flex;overflow:auto}.api-item{min-width:160px}.card{padding:16px}.actions span{font-size:12px}.catalog-row{flex-wrap:wrap}.tabs{overflow:auto;white-space:nowrap}}
+@media(prefers-color-scheme:dark){:root{--bg:#111827;--card:#1c2637;--text:#e8edf6;--muted:#aab6c9;--border:#38465a;--accent:#83a6ff;--soft:#23334d;--good:#75dbad;--bad:#ff9d96}.primary{background:#416bdc;border-color:#416bdc;color:#fff}}
 </style>
 </head>
-<body>
-<main>
-<header><div><div class="eyebrow">CLIProxyAPI · OH-MY-PI</div><h1>OMP 适配器</h1><p>让 OMP 发现 CPA 模型，并按需要设置易记的模型名。</p></div><span id="status" class="pill">尚未连接</span></header>
-<section class="card" id="login-card" aria-labelledby="login-title">
-<h2 id="login-title">连接管理中心</h2><p>请输入 CPA 的管理密钥。它只保存在当前页面的内存中，刷新页面后需要重新输入。</p>
-<form id="login-form" class="row"><label>管理密钥<input id="management-key" type="password" autocomplete="current-password" required placeholder="CPA 管理密钥"></label><button class="primary" type="submit">连接</button></form>
-<p class="hint">不是给 OMP 使用的客户端 API Key。请只在可信的 HTTPS 或本机页面输入。</p><div id="login-message" class="feedback" role="alert"></div>
-</section>
+<body><main>
+<header><h1>API 适配器</h1><span id="status" class="pill">尚未连接</span></header>
+<section id="login-card" class="card"><h2>连接管理中心</h2><form id="login-form"><label>CPA 管理密钥<input id="management-key" type="password" autocomplete="current-password" required></label><button class="primary" type="submit">连接</button></form><div id="login-message" class="feedback" role="alert"></div></section>
 <div id="app" hidden>
-<section class="card" aria-labelledby="connection-title">
-<div class="card-head"><div><h2 id="connection-title">连接地址</h2><p>复用 CPA 的对外地址和端口，通过现有反向代理增加一条路由。</p></div></div>
-<div class="notice"><strong>OMP 的 Base URL</strong><div class="address"><code id="base-url"></code><button type="button" id="copy">复制</button></div><span id="base-copy-status" class="copy-feedback" role="status" aria-live="polite"></span><span class="hint" id="base-hint"></span></div>
-<div class="grid">
-<label>本地套接字路径<input id="socket-path" placeholder="/tmp/cpa-omp-adapter.sock"><small>连接反向代理与插件，不占用新的 TCP 端口。路径的父目录须已存在。</small></label>
-<label>CPA 内部地址<input id="upstream" placeholder="http://127.0.0.1:8317"><small>支持 HTTP 和 HTTPS；HTTP 会明文传输客户端密钥及请求内容，请仅在可信网络使用。</small></label>
-<label>适配路由前缀<input id="prefix" placeholder="/omp"><small>例如 /omp；修改后需要同步更新反向代理配置。</small></label>
-<label>对外 Base URL（可选）<input id="public-base" placeholder="https://example.com/omp/backend-api"><small>仅用于展示和复制；公网访问建议配置 HTTPS 反向代理。</small></label>
+<nav class="tabs" role="tablist" aria-label="管理页签"><button id="tab-apis" role="tab" aria-selected="true" aria-controls="page-apis" data-page="apis">API</button><button id="tab-settings" role="tab" aria-selected="false" aria-controls="page-settings" data-page="settings" tabindex="-1">设置</button></nav>
+<section id="page-apis" role="tabpanel" aria-labelledby="tab-apis" class="layout">
+<aside class="card sidebar"><div class="head"><h2>API</h2><button id="add-api" type="button">新增</button></div><div id="api-list" class="api-list"></div></aside>
+<div id="no-api" class="card empty">尚未配置 API</div>
+<section id="api-editor" class="card" hidden>
+<div class="head"><h2 id="api-title">API</h2><button id="remove-api" class="danger" type="button">删除 API</button></div>
+<nav class="tabs" role="tablist" aria-label="API 页签"><button id="tab-config" role="tab" aria-selected="true" aria-controls="panel-config" data-panel="config">配置</button><button id="tab-models" role="tab" aria-selected="false" aria-controls="panel-models" data-panel="models" tabindex="-1">模型</button><button id="tab-access" role="tab" aria-selected="false" aria-controls="panel-access" data-panel="access" tabindex="-1">接入</button></nav>
+<div id="panel-config" role="tabpanel" aria-labelledby="tab-config"><div class="grid">
+<label>名称<input id="api-name" autocomplete="off"></label>
+<label>出口格式<select id="api-format"><option value="v1">v1</option><option value="backend-api">backend-api</option></select></label>
+<label class="full">API Key<div class="key-row"><input id="api-key" type="password" autocomplete="off" required><button id="show-key" type="button" aria-pressed="false">显示</button></div></label>
+<label>路由前缀<input id="api-prefix" required placeholder="/work"></label>
+<label>CPA 内部地址<input id="api-upstream" type="url" required placeholder="http://127.0.0.1:8317"></label>
+<label class="full">对外 Base URL（可选）<input id="api-public" type="url"></label>
+</div></div>
+<div id="panel-models" role="tabpanel" aria-labelledby="tab-models" hidden>
+<div class="head"><h3>暴露模型</h3><div class="row"><button id="load-models" type="button">获取模型</button><button id="add-model" type="button">添加模型</button></div></div>
+<div id="catalog-message" class="feedback" role="status"></div>
+<div id="catalog-results" hidden><label>搜索模型<input id="model-filter" type="search"></label><div id="model-list" class="catalog" role="list" aria-label="上游模型"></div><div class="row"><span id="catalog-count" class="count"></span><button id="show-more" type="button" hidden>显示更多</button></div></div>
+<div id="mappings"></div><div id="empty-models" class="empty">全部模型</div>
 </div>
-<details><summary>高级连接设置</summary><div class="grid" style="margin-top:12px"><label>最大请求体（MB）<input id="max-body" type="number" min="1" max="512" step="1"><small>包含上下文和图片的请求不能超过这个大小；代理也需要允许同样大小。</small></label><label>套接字权限（Linux / macOS）<select id="socket-mode" aria-label="套接字权限"><option value="0660">0660 · 所有者和同组用户（推荐）</option><option value="0600">0600 · 仅所有者</option><option value="0666">0666 · 所有本机用户</option></select><small>反向代理运行账号需要连接权限。Windows 使用文件系统访问控制。</small></label></div></details>
-<details><summary>反向代理配置示例</summary><p>修改路由前缀或套接字后，需同步修改代理配置并重载；插件不会自动更改代理配置。代理和插件必须能访问同一套接字文件。</p><label>代理软件<select id="proxy-type" aria-label="代理软件"><option value="nginx">Nginx</option><option value="caddy">Caddy</option></select></label><pre id="proxy-snippet"></pre><button type="button" id="copy-proxy">复制配置</button><span id="proxy-copy-status" class="copy-feedback" role="status" aria-live="polite"></span></details>
-</section>
-<section class="card" aria-labelledby="models-title">
-<div class="card-head"><div><h2 id="models-title">模型映射</h2><p>默认自动提供 CPA 模型，不添加映射也能使用。映射只影响此适配器。</p></div><button type="button" id="add-model">添加映射</button></div>
-<div class="notice warn">账号隔离依赖 CPA 的凭据前缀和路由配置；显示名称或别名本身不能保证固定账号。请为不同账号设置唯一前缀并验证实际调用。</div>
-<details id="catalog-panel"><summary>从 CPA 获取可选模型</summary><p>输入客户端 API Key，使用已保存的 CPA 内部地址读取模型目录；密钥不会保存。</p><div class="row"><label>客户端 API Key<input id="client-key" type="password" autocomplete="off" placeholder="CPA 客户端 API Key"></label><button type="button" id="load-models">获取模型</button></div><div id="catalog-message" class="feedback" role="status"></div>
-<div id="catalog-results" class="catalog-results" hidden><p id="catalog-source" class="hint"></p><div class="catalog-toolbar"><label>搜索模型<input id="model-filter" type="search" placeholder="按模型名称或 ID 搜索"></label><span id="catalog-count" class="catalog-count" aria-live="polite"></span></div><div id="model-list" class="catalog-list" role="list" aria-label="CPA 模型列表"></div><p id="model-empty" class="empty" hidden>没有找到匹配的模型。</p><button type="button" id="show-more-models" class="catalog-more" hidden>显示更多</button></div></details>
-<div id="mappings"></div><div id="empty-models" class="empty">还没有自定义映射。OMP 会直接看到 CPA 的模型。</div>
-</section>
+<div id="panel-access" role="tabpanel" aria-labelledby="tab-access" hidden>
+<div class="address"><code id="base-url"></code><button id="copy-url" type="button">复制地址</button></div>
+<label>代理软件<select id="proxy-type"><option value="nginx">Nginx</option><option value="caddy">Caddy</option></select></label><pre id="proxy-snippet"></pre><button id="copy-proxy" type="button">复制配置</button><div id="copy-message" class="feedback" role="status"></div>
+</div>
+</section></section>
+<section id="page-settings" role="tabpanel" aria-labelledby="tab-settings" class="card" hidden><div class="head"><h2>设置</h2></div><div class="grid">
+<label class="full">本地套接字路径<input id="socket-path" required></label>
+<label>套接字权限<select id="socket-mode"><option value="0660">0660</option><option value="0600">0600</option><option value="0666">0666</option></select></label>
+<label>最大请求体（MB）<input id="max-body" type="number" min="1" max="512" step="1" required></label>
+</div><div class="notice">API Key 保存在 CPA 配置文件中；管理密钥仅保存在当前页面内存中。</div></section>
 <div id="message" class="feedback" role="status" aria-live="polite"></div>
-<div class="actions"><span>设置保存在 CPA 配置中；不会保存管理密钥或客户端密钥。</span><button id="save" class="primary" type="button">保存设置</button></div>
+<div class="actions"><span id="save-state">已保存</span><button id="save" class="primary" type="button">保存全部</button></div>
 </div>
 </main>
-<template id="model-template">
-<div class="mapping">
-<div class="mapping-head"><h3 class="mapping-title">模型映射</h3><button type="button" class="remove danger">删除</button></div>
-<div class="grid">
-<label>CPA 目标模型<input class="target" placeholder="例如 account-a/gpt-5.5"><small>填写 CPA 中完整的模型 ID，或从上方模型列表添加。</small></label>
-<label>OMP 可见模型 ID<input class="id" placeholder="例如 work-codex"><small>只想改显示名时，与目标模型填写相同的 ID。</small></label>
-<label class="full">显示名称（可选）<input class="display" placeholder="例如 工作账号 Codex"><small>仅影响模型列表中的名称，不改变路由。</small></label>
-</div>
-<details><summary>模型能力（可选）</summary><p>留空表示沿用 CPA 的目标模型信息。仅填写你已确认的能力；OMP 可能忽略部分字段。</p>
-<div class="grid">
-<label>上下文窗口<input class="context" type="number" min="1" step="1" placeholder="沿用 CPA"></label>
-<label>最大上下文窗口<input class="max-context" type="number" min="1" step="1" placeholder="沿用 CPA"></label>
-<label>最大输出 token<input class="max-tokens" type="number" min="1" step="1" placeholder="沿用 CPA"><small>OMP 可能不读取此字段。</small></label>
-<label>输入类型<select class="modalities" aria-label="输入类型"><option value="">沿用 CPA</option><option value="text">仅文本</option><option value="text,image">文本和图片</option></select></label>
-<fieldset class="full"><legend>支持的推理等级</legend><small class="hint">不选择则沿用 CPA；需要禁用时只选 none。</small><div class="checks"><label><input type="checkbox" value="none"> none</label><label><input type="checkbox" value="minimal"> minimal</label><label><input type="checkbox" value="low"> low</label><label><input type="checkbox" value="medium"> medium</label><label><input type="checkbox" value="high"> high</label><label><input type="checkbox" value="xhigh"> xhigh</label><label><input type="checkbox" value="max"> max</label><label><input type="checkbox" value="ultra"> ultra</label></div></fieldset>
-<label>默认推理等级<select class="default-reasoning" aria-label="默认推理等级"><option value="">使用第一个所选等级</option><option>none</option><option>minimal</option><option>low</option><option>medium</option><option>high</option><option>xhigh</option><option>max</option><option>ultra</option></select></label>
-</div></details></div>
-</template>
+<template id="model-template"><div class="mapping"><div class="head"><h3 class="mapping-title">模型</h3><button type="button" class="remove danger">删除</button></div><div class="grid">
+<label>CPA 目标模型<input class="target" required></label><label>对外模型 ID<input class="id" required></label><label class="full">显示名称（可选）<input class="display"></label></div>
+<details><summary>模型能力</summary><div class="grid"><label>上下文窗口<input class="context" type="number" min="1" step="1"></label><label>最大上下文窗口<input class="max-context" type="number" min="1" step="1"></label><label>最大输出 token<input class="max-tokens" type="number" min="1" step="1"></label><label>输入类型<select class="modalities"><option value="">沿用 CPA</option><option value="text">文本</option><option value="text,image">文本和图片</option></select></label><fieldset class="full"><legend>推理等级</legend><div class="checks"><label><input type="checkbox" value="none">none</label><label><input type="checkbox" value="minimal">minimal</label><label><input type="checkbox" value="low">low</label><label><input type="checkbox" value="medium">medium</label><label><input type="checkbox" value="high">high</label><label><input type="checkbox" value="xhigh">xhigh</label><label><input type="checkbox" value="max">max</label><label><input type="checkbox" value="ultra">ultra</label></div></fieldset><label>默认推理等级<select class="default-reasoning"><option value="">沿用所选等级</option><option>none</option><option>minimal</option><option>low</option><option>medium</option><option>high</option><option>xhigh</option><option>max</option><option>ultra</option></select></label></div></details></div></template>
 <script>
 'use strict';
 const $ = id => document.getElementById(id);
-const resourceMarker = '/v0/resource/plugins/cpa-omp-adapter/';
-const markerIndex = location.pathname.indexOf(resourceMarker);
-const root = markerIndex < 0 ? '' : location.pathname.slice(0, markerIndex);
-const management = root + '/v0/management/plugins/cpa-omp-adapter/';
-const configURL = root + '/v8/management/config/plugins/configs/cpa-omp-adapter';
-let managementKey = '';
-let dirty = false;
-let catalogModels = [];
-let catalogSource = '';
-let savedUpstream = '';
-let catalogLimit = 50;
-const catalogPageSize = 50;
-const selectControllers = new WeakMap();
-let openSelect = null;
-let selectSequence = 0;
-function closeSelect(restoreFocus = false) {
-  if (!openSelect) return;
-  const current = openSelect;
-  openSelect = null;
-  current.menu.hidden = true;
-  current.wrapper.classList.remove('open-up');
-  current.trigger.setAttribute('aria-expanded', 'false');
-  if (restoreFocus) current.trigger.focus();
-}
-function enhanceSelect(select) {
-  if (selectControllers.has(select)) return;
-  const wrapper = document.createElement('div');
-  wrapper.className = 'select-control';
-  const trigger = document.createElement('button');
-  trigger.type = 'button';
-  trigger.className = 'select-trigger';
-  trigger.id = `select-trigger-${++selectSequence}`;
-  trigger.setAttribute('aria-label', select.getAttribute('aria-label') || '选择');
-  trigger.setAttribute('aria-haspopup', 'listbox');
-  trigger.setAttribute('aria-expanded', 'false');
-  const label = document.createElement('span');
-  trigger.append(label);
-  const menu = document.createElement('ul');
-  menu.id = `select-menu-${selectSequence}`;
-  menu.className = 'select-menu';
-  menu.hidden = true;
-  menu.setAttribute('role', 'listbox');
-  menu.setAttribute('aria-labelledby', trigger.id);
-  trigger.setAttribute('aria-controls', menu.id);
-  const items = [...select.options].map((option, index) => {
-    const item = document.createElement('li');
-    item.className = 'select-option';
-    item.setAttribute('role', 'option');
-    item.tabIndex = -1;
-    item.textContent = option.textContent;
-    const choose = () => {
-      select.selectedIndex = index;
-      sync();
-      closeSelect(true);
-      select.dispatchEvent(new Event('input', {bubbles:true}));
-      select.dispatchEvent(new Event('change', {bubbles:true}));
-    };
-    item.addEventListener('click', choose);
-    item.addEventListener('keydown', event => {
-      let next = index;
-      if (event.key === 'ArrowDown') next = (index + 1) % items.length;
-      else if (event.key === 'ArrowUp') next = (index + items.length - 1) % items.length;
-      else if (event.key === 'Home') next = 0;
-      else if (event.key === 'End') next = items.length - 1;
-      else if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); choose(); return; }
-      else if (event.key === 'Escape') { event.preventDefault(); closeSelect(true); return; }
-      else if (event.key === 'Tab') { closeSelect(true); return; }
-      else return;
-      event.preventDefault();
-      items[next].focus();
-    });
-    menu.append(item);
-    return item;
-  });
-  function sync() {
-    label.textContent = select.selectedOptions[0]?.textContent || '';
-    items.forEach((item, index) => item.setAttribute('aria-selected', String(index === select.selectedIndex)));
-  }
-  const controller = {wrapper, trigger, menu, sync};
-  selectControllers.set(select, controller);
-  trigger.addEventListener('click', () => {
-    if (openSelect === controller) { closeSelect(); return; }
-    closeSelect();
-    menu.hidden = false;
-    trigger.setAttribute('aria-expanded', 'true');
-    openSelect = controller;
-    const box = trigger.getBoundingClientRect();
-    if (window.innerHeight - box.bottom < menu.offsetHeight && box.top > window.innerHeight - box.bottom) wrapper.classList.add('open-up');
-    (items[select.selectedIndex] || items[0])?.focus();
-  });
-  trigger.addEventListener('keydown', event => {
-    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') { event.preventDefault(); trigger.click(); }
-  });
-  wrapper.append(trigger, menu);
-  select.hidden = true;
-  select.setAttribute('aria-hidden', 'true');
-  select.insertAdjacentElement('afterend', wrapper);
-  select.addEventListener('change', sync);
-  sync();
-}
-function syncSelect(select) { selectControllers.get(select)?.sync(); }
-document.addEventListener('pointerdown', event => { if (openSelect && !openSelect.wrapper.contains(event.target)) closeSelect(); });
-document.querySelectorAll('select').forEach(enhanceSelect);
-function message(id, text, good = false) { $(id).textContent = text; $(id).classList.toggle('good', good); }
-async function api(url, options = {}) {
-  const headers = new Headers(options.headers || {}); headers.set('Authorization', 'Bearer ' + managementKey);
-  if (options.body) headers.set('Content-Type', 'application/json');
-  const response = await fetch(url, {...options, headers, cache:'no-store', credentials:'same-origin'});
-  let data; try { data = await response.json(); } catch { data = {}; }
-  if (!response.ok) throw new Error(data.error?.message || data.error || `请求失败（HTTP ${response.status}）`);
+const marker = '/v0/resource/plugins/cpa-api-adapter/';
+const index = location.pathname.indexOf(marker);
+const root = index < 0 ? '' : location.pathname.slice(0,index);
+const management = root + '/v0/management/plugins/cpa-api-adapter/';
+const configURL = root + '/v8/management/config/plugins/configs/cpa-api-adapter';
+let managementKey = '', apis = [], active = -1, dirty = false, revision = 0, catalogLimit = 50;
+const catalogs = new WeakMap();
+function message(id,text,good=false){$(id).textContent=text;$(id).classList.toggle('good',good);}
+function changed(){dirty=true;revision++;$('save-state').textContent='未保存';}
+async function api(url,options={}){
+  const headers=new Headers(options.headers||{});headers.set('Authorization','Bearer '+managementKey);
+  if(options.body)headers.set('Content-Type','application/json');
+  const response=await fetch(url,{...options,headers,cache:'no-store',credentials:'same-origin'});
+  let data;try{data=await response.json();}catch{data={};}
+  if(!response.ok)throw new Error(data.error?.message||data.error||'请求失败（HTTP '+response.status+'）');
   return data;
 }
-function setStatus(status) {
-  $('status').className = 'pill ' + (status.running ? 'ok' : 'bad');
-  $('status').textContent = status.running ? '插件已就绪' : '插件未就绪';
-  if (status.error) message('message', status.error);
-}
-function address() {
-  const cfg = collect();
-  const base = cfg.prefix.replace(/\/$/,'') + '/backend-api';
-  $('base-url').textContent = cfg.public_base_url || location.origin + base;
-  $('base-hint').textContent = '地址仅在反向代理配置完成后可用；请使用 CPA 的客户端 API Key。';
-  const socket = cfg.socket_path.replace(/\\/g, '/');
-  if ($('proxy-type').value === 'caddy' && !/[\r\n{}]/.test(socket)) {
-    $('proxy-snippet').textContent = `# 放在现有 CPA 的站点块中，保留原有的 CPA 转发\n@omp path ${base}/*\nhandle @omp {\n    reverse_proxy ${JSON.stringify('unix/' + socket)}\n}`;
-  } else if (!socket.startsWith('/') || /[\s:;{}$#"'\\]/.test(socket)) {
-    $('proxy-snippet').textContent = '此路径不能直接用于 Nginx 示例。请选择 Caddy，或参阅项目说明。';
-  } else {
-    $('proxy-snippet').textContent = `# 放在 http 块中\nmap $http_upgrade $omp_connection_upgrade {\n    default upgrade;\n    '' close;\n}\n\n# 放在现有 CPA 的 server 块中\nlocation ^~ ${base}/ {\n    client_max_body_size ${cfg.max_body_mb}m;\n    proxy_pass http://unix:${socket}:${base}/;\n    proxy_http_version 1.1;\n    proxy_set_header Host $host;\n    proxy_set_header Upgrade $http_upgrade;\n    proxy_set_header Connection $omp_connection_upgrade;\n    proxy_buffering off;\n    proxy_cache off;\n    proxy_request_buffering off;\n    proxy_read_timeout 3600s;\n    proxy_send_timeout 3600s;\n}`;
+function setStatus(status){$('status').textContent=status.running?'插件已就绪':'插件未就绪';$('status').className='pill '+(status.running?'good':'bad');}
+function selectTab(button){
+  const nav=button.parentElement;
+  for(const tab of nav.querySelectorAll('[role=tab]')){
+    const selected=tab===button;tab.setAttribute('aria-selected',String(selected));tab.tabIndex=selected?0:-1;$(tab.getAttribute('aria-controls')).hidden=!selected;
   }
 }
-function addMapping(model = {}) {
-  const node = $('model-template').content.firstElementChild.cloneNode(true);
-  const val = (selector, value) => { node.querySelector(selector).value = value || ''; };
-  val('.target', model.target); val('.id', model.id); val('.display', model.display_name);
-  val('.context', model.context_window); val('.max-context', model.max_context_window); val('.max-tokens', model.max_tokens);
-  val('.modalities', (model.input_modalities || []).join(',')); val('.default-reasoning', model.default_reasoning);
-  node.querySelectorAll('select').forEach(enhanceSelect);
-  for (const checkbox of node.querySelectorAll('input[type=checkbox]')) checkbox.checked = (model.reasoning_levels || []).includes(checkbox.value);
-  node.querySelector('.remove').addEventListener('click', () => { if (openSelect && node.contains(openSelect.wrapper)) closeSelect(); node.remove(); updateMappings(); dirty = true; });
-  $('mappings').append(node); updateMappings();
-  return node;
-}
-function updateMappings() {
-  const nodes = [...document.querySelectorAll('.mapping')];
-  nodes.forEach((node, i) => node.querySelector('.mapping-title').textContent = `映射 ${i+1}`);
-  $('empty-models').hidden = nodes.length > 0;
-  renderCatalog();
-}
-function renderCatalog() {
-  if ($('catalog-results').hidden) return;
-  const query = $('model-filter').value.trim().toLocaleLowerCase();
-  const filtered = catalogModels.filter(model => `${model.id} ${model.name}`.toLocaleLowerCase().includes(query));
-  const counts = new Map();
-  for (const model of catalogModels) counts.set(model.id, (counts.get(model.id) || 0) + 1);
-  const existing = new Map([...document.querySelectorAll('.mapping')].map(node => [node.querySelector('.id').value.trim(), node]));
-  const fragment = document.createDocumentFragment();
-  for (const model of filtered.slice(0, catalogLimit)) {
-    const row = document.createElement('div'); row.className = 'catalog-item'; row.setAttribute('role', 'listitem');
-    const info = document.createElement('div'); info.className = 'catalog-item-info';
-    const name = document.createElement('div'); name.className = 'catalog-item-name'; name.textContent = model.name || model.id;
-    info.append(name);
-    if (model.name && model.name !== model.id) {
-      const id = document.createElement('code'); id.className = 'catalog-item-id'; id.textContent = model.id; info.append(id);
-    }
-    row.append(info);
-    if (counts.get(model.id) > 1) {
-      const warning = document.createElement('span'); warning.className = 'catalog-duplicate'; warning.textContent = '模型 ID 重复，请先检查 CPA'; row.append(warning);
-    } else {
-      const button = document.createElement('button'); button.type = 'button';
-      button.textContent = existing.has(model.id) ? '查看映射' : '添加映射';
-      button.setAttribute('aria-label', `${button.textContent}：${model.id}`);
-      button.addEventListener('click', () => {
-        let node = [...document.querySelectorAll('.mapping')].find(item => item.querySelector('.id').value.trim() === model.id);
-        if (node) {
-          const target = node.querySelector('.target').value.trim();
-          message('message', target === model.id ? '已定位现有映射。' : '此模型 ID 已被其他映射使用，请先检查该映射。', target === model.id);
-        } else {
-          node = addMapping({id:model.id, target:model.id});
-          dirty = true;
-          message('message', '已添加映射；修改 OMP 可见模型 ID 可设置别名。', true);
-        }
-        node.scrollIntoView({block:'start'});
-        const id = node.querySelector('.id'); id.focus({preventScroll:true}); id.select();
-      });
-      row.append(button);
-    }
-    fragment.append(row);
-  }
-  $('model-list').replaceChildren(fragment);
-  $('model-list').hidden = filtered.length === 0;
-  $('model-empty').hidden = filtered.length !== 0;
-  $('model-empty').textContent = catalogModels.length ? '没有找到匹配的模型。' : 'CPA 没有返回可用的模型。';
-  $('catalog-count').textContent = query ? `找到 ${filtered.length} 个 / 共 ${catalogModels.length} 个` : `共 ${catalogModels.length} 个模型`;
-  $('show-more-models').hidden = filtered.length <= catalogLimit;
-  $('show-more-models').textContent = `显示更多（剩余 ${Math.max(0, filtered.length - catalogLimit)} 个）`;
-  const edited = $('upstream').value.trim().replace(/\/$/, '') !== catalogSource;
-  $('catalog-source').textContent = edited ? `列表来自已保存的 CPA 地址 ${catalogSource}；当前地址修改尚未生效。` : `列表来源：${catalogSource}。可搜索模型并直接添加映射。`;
-}
-function collect() {
-  const mappings = [...document.querySelectorAll('.mapping')].map(node => {
-    const value = selector => node.querySelector(selector).value.trim();
-    const item = {id:value('.id'), target:value('.target')};
-    for (const [key, selector] of [['display_name','.display'],['default_reasoning','.default-reasoning']]) { const v = value(selector); if (v) item[key] = v; }
-    for (const [key, selector] of [['context_window','.context'],['max_context_window','.max-context'],['max_tokens','.max-tokens']]) { const v = value(selector); if (v) item[key] = Number(v); }
-    const modalities = value('.modalities'); if (modalities) item.input_modalities = modalities.split(',');
-    const levels = [...node.querySelectorAll('input[type=checkbox]:checked')].map(input => input.value); if (levels.length) item.reasoning_levels = levels;
-    return item;
+for(const nav of document.querySelectorAll('[role=tablist]')){
+  nav.addEventListener('click',event=>{const tab=event.target.closest('[role=tab]');if(tab)selectTab(tab);});
+  nav.addEventListener('keydown',event=>{
+    const tabs=[...nav.querySelectorAll('[role=tab]')];let next=tabs.indexOf(document.activeElement);
+    if(event.key==='ArrowRight')next=(next+1)%tabs.length;else if(event.key==='ArrowLeft')next=(next+tabs.length-1)%tabs.length;else if(event.key==='Home')next=0;else if(event.key==='End')next=tabs.length-1;else return;
+    event.preventDefault();selectTab(tabs[next]);tabs[next].focus();
   });
-  return {socket_path:$('socket-path').value.trim(), socket_mode:$('socket-mode').value, upstream:$('upstream').value.trim().replace(/\/$/,''), prefix:$('prefix').value.trim(), public_base_url:$('public-base').value.trim().replace(/\/$/,''), max_body_mb:Number($('max-body').value), mappings};
 }
-function populate(cfg) {
-  savedUpstream = cfg.upstream;
-  $('socket-path').value=cfg.socket_path; $('socket-mode').value=cfg.socket_mode; $('upstream').value=cfg.upstream; $('prefix').value=cfg.prefix; $('public-base').value=cfg.public_base_url || ''; $('max-body').value=cfg.max_body_mb;
-  $('proxy-type').value=/^[A-Za-z]:[\\/]/.test(cfg.socket_path) ? 'caddy' : 'nginx';
-  syncSelect($('socket-mode')); syncSelect($('proxy-type'));
-  $('mappings').replaceChildren(); for (const model of cfg.mappings || []) addMapping(model); updateMappings(); address(); dirty = false;
+function collectMappings(){return [...$('mappings').children].map(node=>{
+  const value=selector=>node.querySelector(selector).value.trim();const item={id:value('.id'),target:value('.target')};
+  for(const [key,selector] of [['display_name','.display'],['default_reasoning','.default-reasoning']])if(value(selector))item[key]=value(selector);
+  for(const [key,selector] of [['context_window','.context'],['max_context_window','.max-context'],['max_tokens','.max-tokens']])if(value(selector))item[key]=Number(value(selector));
+  if(value('.modalities'))item.input_modalities=value('.modalities').split(',');
+  const levels=[...node.querySelectorAll('input[type=checkbox]:checked')].map(input=>input.value);if(levels.length)item.reasoning_levels=levels;
+  return item;
+});}
+function storeActive(){if(active<0)return;Object.assign(apis[active],{name:$('api-name').value.trim(),api_key:$('api-key').value.trim(),prefix:$('api-prefix').value.trim(),upstream:$('api-upstream').value.trim().replace(/\/$/,''),format:$('api-format').value,public_base_url:$('api-public').value.trim().replace(/\/$/,''),mappings:collectMappings()});}
+function collect(){storeActive();return {socket_path:$('socket-path').value.trim(),socket_mode:$('socket-mode').value,max_body_mb:Number($('max-body').value),apis:structuredClone(apis)};}
+function renderAPIs(){
+  $('api-list').replaceChildren();apis.forEach((item,i)=>{
+    const button=document.createElement('button');button.type='button';button.className='api-item';button.setAttribute('aria-current',String(i===active));
+    const name=document.createElement('span');name.textContent=item.name||'API '+(i+1);const path=document.createElement('code');path.textContent=item.prefix?item.prefix+'/'+item.format:'未设置前缀';button.append(name,path);
+    button.addEventListener('click',()=>{storeActive();showAPI(i);});$('api-list').append(button);
+  });
+  $('api-title').textContent=active<0?'API':apis[active].name||'API '+(active+1);
 }
-$('login-form').addEventListener('submit', async event => {
-  event.preventDefault(); managementKey = $('management-key').value; message('login-message','');
-  try { const status = await api(management+'status'); $('management-key').value=''; $('login-card').hidden=true; $('app').hidden=false; populate(status.config); setStatus(status); }
-  catch (error) { managementKey=''; message('login-message',error.message); }
-});
-$('add-model').addEventListener('click', () => { addMapping(); dirty=true; });
-$('app').addEventListener('input', event => {
-  if (event.target.id === 'client-key' || event.target.id === 'model-filter') return;
-  if (event.target.id !== 'proxy-type') dirty = true;
-  if (event.target.id === 'upstream' || event.target.classList.contains('id')) renderCatalog();
-  address();
-});
-async function copyText(text) {
-  if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
-    try { await navigator.clipboard.writeText(text); return true; } catch { /* Try the selection-based fallback. */ }
+function showAPI(i){
+  active=i;$('no-api').hidden=i>=0;$('api-editor').hidden=i<0;renderAPIs();if(i<0)return;
+  const item=apis[i];for(const [id,key] of [['api-name','name'],['api-key','api_key'],['api-prefix','prefix'],['api-upstream','upstream'],['api-format','format'],['api-public','public_base_url']])$(id).value=item[key]||'';
+  $('api-key').type='password';$('show-key').textContent='显示';$('show-key').setAttribute('aria-pressed','false');
+  $('mappings').replaceChildren();for(const model of item.mappings||[])addMapping(model);
+  $('model-filter').value='';catalogLimit=50;message('catalog-message','');message('copy-message','');updateMappings();address();
+}
+function addMapping(model={}){
+  const node=$('model-template').content.firstElementChild.cloneNode(true);
+  for(const [selector,key] of [['.id','id'],['.target','target'],['.display','display_name'],['.context','context_window'],['.max-context','max_context_window'],['.max-tokens','max_tokens'],['.default-reasoning','default_reasoning']])node.querySelector(selector).value=model[key]||'';
+  node.querySelector('.modalities').value=(model.input_modalities||[]).join(',');for(const input of node.querySelectorAll('input[type=checkbox]'))input.checked=(model.reasoning_levels||[]).includes(input.value);
+  node.querySelector('.remove').addEventListener('click',()=>{node.remove();storeActive();changed();updateMappings();});$('mappings').append(node);updateMappings();return node;
+}
+function updateMappings(){[...$('mappings').children].forEach((node,i)=>node.querySelector('.mapping-title').textContent='模型 '+(i+1));$('empty-models').hidden=$('mappings').children.length>0;renderCatalog();}
+function fingerprint(item){return JSON.stringify([item.api_key,item.upstream,item.format]);}
+function renderCatalog(){
+  const entry=active<0?null:catalogs.get(apis[active]);const valid=entry&&entry.fingerprint===fingerprint(apis[active]);$('catalog-results').hidden=!valid;if(!valid)return;
+  const query=$('model-filter').value.trim().toLocaleLowerCase();const filtered=entry.models.filter(model=>(model.id+' '+model.name).toLocaleLowerCase().includes(query));
+  const counts=new Map();for(const model of entry.models)counts.set(model.id,(counts.get(model.id)||0)+1);
+  const existing=new Set(collectMappings().map(model=>model.id));$('model-list').replaceChildren();
+  for(const model of filtered.slice(0,catalogLimit)){
+    const row=document.createElement('div');row.className='catalog-row';row.setAttribute('role','listitem');const info=document.createElement('div');const name=document.createElement('strong');name.textContent=model.name||model.id;const id=document.createElement('code');id.textContent=model.id;info.append(name,id);
+    const button=document.createElement('button');button.type='button';button.textContent=counts.get(model.id)>1?'ID 重复':existing.has(model.id)?'已添加':'添加';button.disabled=counts.get(model.id)>1||existing.has(model.id);
+    button.addEventListener('click',()=>{addMapping({id:model.id,target:model.id});storeActive();changed();});row.append(info,button);$('model-list').append(row);
   }
-  const previous = document.activeElement;
-  const field = document.createElement('textarea');
-  field.value = text;
-  field.readOnly = true;
-  field.setAttribute('aria-hidden', 'true');
-  field.style.position = 'fixed'; field.style.left = '-9999px'; field.style.top = '0';
-  document.body.append(field);
-  try {
-    field.focus({preventScroll:true}); field.select(); field.setSelectionRange(0, text.length);
-    return typeof document.execCommand === 'function' && document.execCommand('copy');
-  } catch { return false; }
-  finally { field.remove(); previous?.focus({preventScroll:true}); }
+  if(!filtered.length)$('model-list').textContent='没有匹配的模型';$('catalog-count').textContent=filtered.length+' / '+entry.models.length+' 个模型';$('show-more').hidden=filtered.length<=catalogLimit;
 }
-async function copyElement(elementId, statusId) {
-  const element = $(elementId), status = $(statusId);
-  const copied = await copyText(element.textContent);
-  status.classList.toggle('good', copied);
-  if (copied) { status.textContent = '已复制到剪贴板。'; return; }
-  try {
-    const range = document.createRange(); range.selectNodeContents(element);
-    const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range);
-    status.textContent = '浏览器不允许自动复制，内容已选中，请按 Ctrl+C 或 ⌘C。';
-  } catch { status.textContent = '浏览器不允许自动复制，请手动选择内容后复制。'; }
+function address(){
+  if(active<0)return;const item=apis[active],base=item.prefix?item.prefix+'/'+item.format:'';
+  $('base-url').textContent=base?(item.public_base_url||location.origin+base):'请填写路由前缀';
+  const socket=$('socket-path').value.trim().replace(/\\/g,'/');
+  if(!base||!/^\/(?:[\p{L}\p{N}_~.!$&'()+,;=:@-]+\/)*[\p{L}\p{N}_~.!$&'()+,;=:@-]+$/u.test(item.prefix)||/[\s;{}$#"'\\]/.test(base)){$('proxy-snippet').textContent='请填写可用于代理配置的路由前缀';return;}
+  if($('proxy-type').value==='caddy'&&!/[\r\n{}]/.test(socket))$('proxy-snippet').textContent='@adapter path '+base+'/*\nhandle @adapter {\n    reverse_proxy '+JSON.stringify('unix/'+socket)+'\n}';
+  else if(!socket.startsWith('/')||/[\s:;{}$#"'\\]/.test(socket))$('proxy-snippet').textContent='此套接字路径不适用于 Nginx 配置，请选择 Caddy';
+  else $('proxy-snippet').textContent='map $http_upgrade $adapter_connection_upgrade {\n    default upgrade;\n    \'\' close;\n}\n\nlocation ^~ '+base+'/ {\n    client_max_body_size '+Number($('max-body').value)+'m;\n    proxy_pass http://unix:'+socket+':'+base+'/;\n    proxy_http_version 1.1;\n    proxy_set_header Host $host;\n    proxy_set_header Upgrade $http_upgrade;\n    proxy_set_header Connection $adapter_connection_upgrade;\n    proxy_buffering off;\n    proxy_cache off;\n    proxy_request_buffering off;\n    proxy_read_timeout 3600s;\n    proxy_send_timeout 3600s;\n}';
 }
-$('copy').addEventListener('click', () => copyElement('base-url', 'base-copy-status'));
-$('copy-proxy').addEventListener('click', () => copyElement('proxy-snippet', 'proxy-copy-status'));
-$('model-filter').addEventListener('input', () => { catalogLimit = catalogPageSize; renderCatalog(); });
-$('show-more-models').addEventListener('click', () => { catalogLimit += catalogPageSize; renderCatalog(); });
-$('load-models').addEventListener('click', async () => {
-  const key = $('client-key').value;
-  const requestedSource = savedUpstream;
-  if (!key.trim()) { message('catalog-message', '请输入 CPA 客户端 API Key。'); return; }
-  const button = $('load-models'); button.disabled = true; message('catalog-message', '正在获取模型…', true);
-  try {
-    const result = await api(management+'catalog', {method:'POST', body:JSON.stringify({client_key:key})});
-    if (!Array.isArray(result.models)) throw new Error('CPA 返回的模型列表格式不正确。');
-    if (savedUpstream !== requestedSource) throw new Error('CPA 地址已变更，请重新获取模型。');
-    $('client-key').value = '';
-    catalogModels = result.models.filter(model => model && typeof model.id === 'string' && model.id !== '').map(model => ({id:model.id, name:typeof model.name === 'string' ? model.name : ''}));
-    catalogSource = requestedSource;
-    catalogLimit = catalogPageSize;
-    $('model-filter').value = '';
-    $('catalog-results').hidden = false;
-    renderCatalog();
-    const warnings = (result.warnings || []).join('；');
-    message('catalog-message', warnings ? `注意：${warnings}` : '', !warnings);
-  } catch (error) {
-    catalogModels = []; catalogSource = ''; $('catalog-results').hidden = true;
-    message('catalog-message', error.message);
-  } finally { button.disabled = false; }
+function populate(cfg){$('socket-path').value=cfg.socket_path;$('socket-mode').value=cfg.socket_mode;$('max-body').value=cfg.max_body_mb;apis=structuredClone(cfg.apis||[]);$('proxy-type').value=/^[A-Za-z]:[\\/]/.test(cfg.socket_path)?'caddy':'nginx';showAPI(apis.length?0:-1);dirty=false;$('save-state').textContent='已保存';}
+$('login-form').addEventListener('submit',async event=>{event.preventDefault();managementKey=$('management-key').value;message('login-message','');try{const status=await api(management+'status');$('management-key').value='';populate(status.config);setStatus(status);$('login-card').hidden=true;$('app').hidden=false;if(status.error)message('message',status.error);}catch(error){managementKey='';message('login-message',error.message);}});
+$('add-api').addEventListener('click',()=>{storeActive();apis.push({name:'',api_key:'',prefix:'',upstream:'http://127.0.0.1:8317',format:'v1',public_base_url:'',mappings:[]});showAPI(apis.length-1);selectTab($('tab-config'));changed();$('api-name').focus();});
+$('remove-api').addEventListener('click',()=>{if(!confirm('删除当前 API？保存后生效。'))return;apis.splice(active,1);showAPI(apis.length?Math.min(active,apis.length-1):-1);changed();});
+$('show-key').addEventListener('click',()=>{const shown=$('api-key').type==='password';$('api-key').type=shown?'text':'password';$('show-key').textContent=shown?'隐藏':'显示';$('show-key').setAttribute('aria-pressed',String(shown));});
+$('add-model').addEventListener('click',()=>{addMapping();storeActive();changed();});
+$('app').addEventListener('input',event=>{if(event.target.id==='model-filter')return;if(event.target.id==='proxy-type'){address();return;}storeActive();changed();renderAPIs();renderCatalog();address();});
+$('app').addEventListener('change',event=>{if(event.target.tagName==='SELECT'){storeActive();if(event.target.id!=='proxy-type')changed();renderCatalog();address();}});
+$('model-filter').addEventListener('input',()=>{catalogLimit=50;renderCatalog();});$('show-more').addEventListener('click',()=>{catalogLimit+=50;renderCatalog();});
+$('load-models').addEventListener('click',async()=>{
+  storeActive();const item=apis[active],request=structuredClone(item),source=fingerprint(item),button=$('load-models');button.disabled=true;message('catalog-message','正在获取模型…',true);
+  try{const result=await api(management+'catalog',{method:'POST',body:JSON.stringify(request)});if(apis[active]!==item||fingerprint(item)!==source)return;if(!Array.isArray(result.models))throw new Error('模型目录格式无效');catalogs.set(item,{fingerprint:source,models:result.models});catalogLimit=50;renderCatalog();message('catalog-message',(result.warnings||[]).join('；'),!(result.warnings||[]).length);}catch(error){if(apis[active]===item){catalogs.delete(item);renderCatalog();message('catalog-message',error.message);}}finally{button.disabled=false;}
 });
-$('save').addEventListener('click', async () => {
-  const button=$('save'); button.disabled=true; message('message','正在检查并保存…',true);
-  try {
-    const cfg=collect(); await api(management+'validate',{method:'POST',body:JSON.stringify(cfg)});
-    await api(configURL,{method:'PATCH',body:JSON.stringify(cfg)});
-    let confirmed=false, last;
-    for (let i=0;i<12;i++) {
-      await new Promise(resolve=>setTimeout(resolve,500));
-      try {
-        last=await api(management+'status'); setStatus(last);
-        if (JSON.stringify(normalize(last.config))===JSON.stringify(normalize(cfg))) { confirmed=true; break; }
-      } catch { /* host may reload the plugin */ }
-    }
-    if (!confirmed) throw new Error('配置已写入 CPA，但尚未确认插件重新加载。请查看 CPA 日志或重新打开此页面。');
-    savedUpstream = last.config.upstream;
-    if (catalogSource && catalogSource !== savedUpstream) {
-      catalogModels = []; catalogSource = ''; $('catalog-results').hidden = true;
-      message('catalog-message', 'CPA 地址已更新，请重新获取模型。');
-    }
-    if (!last.running) throw new Error('配置已写入，但适配器未启动：'+(last.error || '请检查套接字路径和 CPA 日志。'));
-    dirty=false; address(); message('message','插件配置已保存。请确认反向代理配置已同步并重载。',true);
-  } catch (error) { message('message',error.message); }
-  finally { button.disabled=false; }
-});
-function normalize(cfg) {
-  return {socket_path:cfg.socket_path,socket_mode:cfg.socket_mode,upstream:cfg.upstream,prefix:cfg.prefix,public_base_url:cfg.public_base_url||'',max_body_mb:cfg.max_body_mb,mappings:(cfg.mappings||[]).map(m=>({id:m.id,target:m.target,display_name:m.display_name||'',context_window:m.context_window||0,max_context_window:m.max_context_window||0,max_tokens:m.max_tokens||0,input_modalities:m.input_modalities||[],reasoning_levels:m.reasoning_levels||[],default_reasoning:m.default_reasoning||''}))};
+async function copyElement(id){
+  const text=$(id).textContent;let copied=false;
+  try{await navigator.clipboard.writeText(text);copied=true;}catch{
+    const previous=document.activeElement,field=document.createElement('textarea');field.value=text;field.style.position='fixed';field.style.left='-9999px';document.body.append(field);
+    try{field.focus();field.select();copied=document.execCommand('copy');}catch{}finally{field.remove();previous?.focus();}
+  }
+  if(!copied){const range=document.createRange();range.selectNodeContents($(id));const selection=window.getSelection();selection.removeAllRanges();selection.addRange(range);}
+  message('copy-message',copied?'已复制':'内容已选中，请手动复制',copied);
 }
-window.addEventListener('beforeunload', event => { if (dirty) { event.preventDefault(); event.returnValue=''; } });
+$('copy-url').addEventListener('click',()=>copyElement('base-url'));$('copy-proxy').addEventListener('click',()=>copyElement('proxy-snippet'));
+function normalize(cfg){return {socket_path:cfg.socket_path,socket_mode:cfg.socket_mode,max_body_mb:cfg.max_body_mb,apis:(cfg.apis||[]).map(item=>({name:item.name||'',api_key:item.api_key,upstream:item.upstream,prefix:item.prefix,format:item.format,public_base_url:item.public_base_url||'',mappings:(item.mappings||[]).map(model=>({id:model.id,target:model.target,display_name:model.display_name||'',context_window:model.context_window||0,max_context_window:model.max_context_window||0,max_tokens:model.max_tokens||0,input_modalities:model.input_modalities||[],reasoning_levels:model.reasoning_levels||[],default_reasoning:model.default_reasoning||''}))}))};}
+$('save').addEventListener('click',async()=>{
+  const button=$('save');button.disabled=true;message('message','正在保存…',true);
+  try{
+    const cfg=collect(),savedRevision=revision;await api(management+'validate',{method:'POST',body:JSON.stringify(cfg)});await api(configURL,{method:'PATCH',body:JSON.stringify(cfg)});
+    let last,confirmed=false;for(let i=0;i<12;i++){await new Promise(resolve=>setTimeout(resolve,500));try{last=await api(management+'status');setStatus(last);if(JSON.stringify(normalize(last.config))===JSON.stringify(normalize(cfg))){confirmed=true;break;}}catch{}}
+    if(!confirmed)throw new Error('配置已写入，尚未确认插件重新加载，请检查 CPA 日志');if(!last.running)throw new Error('配置已写入，但插件未启动：'+(last.error||'请检查套接字路径'));
+    if(revision===savedRevision){dirty=false;$('save-state').textContent='已保存';}message('message',dirty?'配置已保存；当前页面仍有未保存修改':'配置已保存',true);
+  }catch(error){message('message',error.message);}finally{button.disabled=false;}
+});
+window.addEventListener('beforeunload',event=>{if(dirty){event.preventDefault();event.returnValue='';}});
 </script>
 </body></html>

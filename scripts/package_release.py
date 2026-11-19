@@ -6,7 +6,7 @@ import pathlib
 import re
 import zipfile
 
-PLUGIN_ID = "cpa-omp-adapter"
+PLUGIN_ID = "cpa-api-adapter"
 PLATFORMS = {
     "linux_amd64": f"{PLUGIN_ID}.so",
     "linux_arm64": f"{PLUGIN_ID}.so",

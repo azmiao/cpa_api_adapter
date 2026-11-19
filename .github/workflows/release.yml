@@ -1,4 +1,4 @@
-name: Build and release CPA OMP Adapter
+name: Build and release CPA API Adapter
 
 on:
   push:
@@ -27,23 +27,23 @@ jobs:
           - platform: linux_amd64
             runner: ubuntu-24.04
             arch: amd64
-            library: cpa-omp-adapter.so
+            library: cpa-api-adapter.so
           - platform: linux_arm64
             runner: ubuntu-24.04-arm
             arch: arm64
-            library: cpa-omp-adapter.so
+            library: cpa-api-adapter.so
           - platform: darwin_amd64
             runner: macos-15-intel
             arch: amd64
-            library: cpa-omp-adapter.dylib
+            library: cpa-api-adapter.dylib
           - platform: darwin_arm64
             runner: macos-15
             arch: arm64
-            library: cpa-omp-adapter.dylib
+            library: cpa-api-adapter.dylib
           - platform: windows_amd64
             runner: windows-2022
             arch: amd64
-            library: cpa-omp-adapter.dll
+            library: cpa-api-adapter.dll
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -99,8 +99,8 @@ jobs:
           export CGO_CFLAGS='-mcpu=baseline'
           mkdir -p build
           go build -trimpath -buildvcs=false -buildmode=c-shared \
-            -ldflags "-X=cpa-omp-adapter/internal/adapter.pluginVersion=$PLUGIN_VERSION" \
-            -o build/cpa-omp-adapter.so ./cmd/cpa-omp-adapter
+            -ldflags "-X=cpa-api-adapter/internal/adapter.pluginVersion=$PLUGIN_VERSION" \
+            -o build/cpa-api-adapter.so ./cmd/cpa-api-adapter
       - name: Build macOS library
         if: runner.os == 'macOS'
         shell: bash
@@ -113,8 +113,8 @@ jobs:
           if [[ "$TARGET_ARCH" == amd64 ]]; then export GOAMD64=v1; else export GOARM64=v8.0; fi
           mkdir -p build
           go build -trimpath -buildvcs=false -buildmode=c-shared \
-            -ldflags "-X=cpa-omp-adapter/internal/adapter.pluginVersion=$PLUGIN_VERSION" \
-            -o build/cpa-omp-adapter.dylib ./cmd/cpa-omp-adapter
+            -ldflags "-X=cpa-api-adapter/internal/adapter.pluginVersion=$PLUGIN_VERSION" \
+            -o build/cpa-api-adapter.dylib ./cmd/cpa-api-adapter
       - name: Build Windows library
         if: runner.os == 'Windows'
         shell: msys2 {0}
@@ -127,8 +127,8 @@ jobs:
           export CGO_CFLAGS='-march=x86-64' CGO_LDFLAGS='-static -static-libgcc'
           mkdir -p build
           go build -trimpath -buildvcs=false -buildmode=c-shared \
-            -ldflags "-X=cpa-omp-adapter/internal/adapter.pluginVersion=$PLUGIN_VERSION" \
-            -o build/cpa-omp-adapter.dll ./cmd/cpa-omp-adapter
+            -ldflags "-X=cpa-api-adapter/internal/adapter.pluginVersion=$PLUGIN_VERSION" \
+            -o build/cpa-api-adapter.dll ./cmd/cpa-api-adapter
       - name: Verify compiled CPA ABI
         shell: bash
         env:
@@ -145,7 +145,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: plugin-${{ matrix.platform }}
-          path: dist/cpa-omp-adapter_${{ steps.version.outputs.version }}_${{ matrix.platform }}.zip
+          path: dist/cpa-api-adapter_${{ steps.version.outputs.version }}_${{ matrix.platform }}.zip
           if-no-files-found: error
           retention-days: 14
 
@@ -170,7 +170,7 @@ jobs:
           cd dist
           files=()
           for platform in linux_amd64 linux_arm64 darwin_amd64 darwin_arm64 windows_amd64; do
-            file="cpa-omp-adapter_${version}_${platform}.zip"
+            file="cpa-api-adapter_${version}_${platform}.zip"
             test -s "$file"
             files+=("$file")
           done
@@ -184,5 +184,5 @@ jobs:
         run: |
           gh release create "$GITHUB_REF_NAME" dist/*.zip dist/checksums.txt \
             --verify-tag \
-            --title "CPA OMP Adapter $GITHUB_REF_NAME" \
+            --title "CPA API Adapter $GITHUB_REF_NAME" \
             --generate-notes

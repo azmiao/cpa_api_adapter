@@ -1,7 +1,6 @@
 package adapter
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -23,12 +22,14 @@ type catalog struct {
 	payload map[string]json.RawMessage
 	models  []map[string]json.RawMessage
 	byID    map[string][]map[string]json.RawMessage
+	listKey string
+	idKey   string
 }
 
 var localTransport = &http.Transport{Proxy: nil, MaxIdleConns: 64, MaxIdleConnsPerHost: 16, IdleConnTimeout: 90 * time.Second}
 var catalogClient = &http.Client{Transport: localTransport, Timeout: 15 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 
-func targetURL(cfg Config, suffix string, query string) *url.URL {
+func targetURL(cfg APIConfig, suffix string, query string) *url.URL {
 	u, _ := url.Parse(cfg.Upstream)
 	u.Path = strings.TrimRight(u.Path, "/") + suffix
 	u.RawPath = ""
@@ -36,13 +37,17 @@ func targetURL(cfg Config, suffix string, query string) *url.URL {
 	return u
 }
 
-func fetchCatalog(ctx context.Context, cfg Config, headers http.Header, query string) (*catalog, error) {
+func fetchCatalog(ctx context.Context, cfg APIConfig, headers http.Header, query string) (*catalog, error) {
 	q, err := url.ParseQuery(query)
 	if err != nil {
 		return nil, &apiError{http.StatusBadRequest, "查询参数无效"}
 	}
-	if q.Get("client_version") == "" {
-		q.Set("client_version", "0.159.0")
+	if cfg.Format == "backend-api" {
+		if q.Get("client_version") == "" {
+			q.Set("client_version", "0.159.0")
+		}
+	} else {
+		q.Del("client_version")
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, targetURL(cfg, "/v1/models", q.Encode()).String(), nil)
 	if err != nil {
@@ -70,13 +75,16 @@ func fetchCatalog(ctx context.Context, cfg Config, headers http.Header, query st
 	if err != nil || len(body) > 16<<20 {
 		return nil, &apiError{http.StatusBadGateway, "CPA 模型目录读取失败或过大"}
 	}
-	c := &catalog{byID: make(map[string][]map[string]json.RawMessage)}
-	if json.Unmarshal(body, &c.payload) != nil || json.Unmarshal(c.payload["models"], &c.models) != nil || c.models == nil {
-		return nil, &apiError{http.StatusBadGateway, "CPA 未返回 Codex 格式模型目录，请检查版本和 client_version"}
+	c := &catalog{byID: make(map[string][]map[string]json.RawMessage), listKey: "models", idKey: "slug"}
+	if cfg.Format == "v1" {
+		c.listKey, c.idKey = "data", "id"
+	}
+	if json.Unmarshal(body, &c.payload) != nil || json.Unmarshal(c.payload[c.listKey], &c.models) != nil || c.models == nil {
+		return nil, &apiError{http.StatusBadGateway, "CPA 未返回所选格式的模型目录"}
 	}
 	for _, entry := range c.models {
 		var id string
-		_ = json.Unmarshal(entry["slug"], &id)
+		_ = json.Unmarshal(entry[c.idKey], &id)
 		if id != "" {
 			c.byID[id] = append(c.byID[id], entry)
 		}
@@ -94,41 +102,36 @@ func (c *catalog) validateMapping(m Model) error {
 	return nil
 }
 
-func (c *catalog) render(cfg Config) ([]byte, []string, error) {
-	models := append([]map[string]json.RawMessage(nil), c.models...)
+func (c *catalog) render(cfg APIConfig) ([]byte, []string, error) {
+	models := c.models
 	var warnings []string
-	for _, mapping := range cfg.Mappings {
-		if err := c.validateMapping(mapping); err != nil {
-			if ae, ok := err.(*apiError); ok && ae.Status == http.StatusConflict {
-				return nil, nil, err
-			}
-			warnings = append(warnings, err.Error())
-			continue
-		}
-		entry := make(map[string]json.RawMessage, len(c.byID[mapping.Target][0]))
-		for k, v := range c.byID[mapping.Target][0] {
-			entry[k] = v
-		}
-		mapping.Apply(entry)
-		if mapping.ID == mapping.Target {
-			for i, model := range models {
-				if bytes.Equal(model["slug"], c.byID[mapping.Target][0]["slug"]) {
-					models[i] = entry
-					break
+	if len(cfg.Mappings) > 0 {
+		models = make([]map[string]json.RawMessage, 0, len(cfg.Mappings))
+		for _, mapping := range cfg.Mappings {
+			if err := c.validateMapping(mapping); err != nil {
+				if ae, ok := err.(*apiError); ok && ae.Status == http.StatusConflict {
+					return nil, nil, err
 				}
+				warnings = append(warnings, err.Error())
+				continue
 			}
-		} else {
+			entry := make(map[string]json.RawMessage, len(c.byID[mapping.Target][0]))
+			for k, v := range c.byID[mapping.Target][0] {
+				entry[k] = v
+			}
+			mapping.Apply(entry)
+			if c.idKey == "id" {
+				delete(entry, "slug")
+				entry["id"], _ = json.Marshal(mapping.ID)
+			}
 			models = append(models, entry)
 		}
-	}
-	if models == nil {
-		models = []map[string]json.RawMessage{}
 	}
 	b, err := json.Marshal(models)
 	if err != nil {
 		return nil, nil, err
 	}
-	c.payload["models"] = b
+	c.payload[c.listKey] = b
 	b, err = json.Marshal(c.payload)
 	return b, warnings, err
 }

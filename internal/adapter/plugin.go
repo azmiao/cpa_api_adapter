@@ -11,7 +11,7 @@ import (
 //go:embed index.html
 var page []byte
 
-var pluginVersion = "0.1.4"
+var pluginVersion = "0.2.0"
 
 type RPC struct{ Manager *Manager }
 
@@ -58,7 +58,7 @@ func (p *RPC) Handle(method string, request []byte) ([]byte, error) {
 		}
 		result = map[string]any{
 			"schema_version": 6,
-			"metadata":       map[string]any{"Name": "CPA OMP Adapter", "Version": pluginVersion, "Author": "azmiao", "GitHubRepository": "https://github.com/azmiao/cpa_omp_adapter", "ConfigFields": []any{}},
+			"metadata":       map[string]any{"Name": "CPA API Adapter", "Version": pluginVersion, "Author": "azmiao", "GitHubRepository": "https://github.com/azmiao/cpa_api_adapter", "ConfigFields": []any{}},
 			"capabilities":   map[string]any{"management_api": true},
 		}
 	case "plugin.quiesce", "plugin.shutdown":
@@ -66,7 +66,7 @@ func (p *RPC) Handle(method string, request []byte) ([]byte, error) {
 		result = map[string]any{}
 	case "management.register":
 		result = map[string]any{
-			"resources": []any{map[string]any{"Path": "/index.html", "Menu": "OMP 适配器", "Description": "配置 OMP 的模型目录、连接地址和模型映射"}},
+			"resources": []any{map[string]any{"Path": "/index.html", "Menu": "API 适配器", "Description": "配置独立 API 路由和模型"}},
 			"routes": []any{
 				map[string]any{"Method": "GET", "Path": "/plugins/" + PluginID + "/status"},
 				map[string]any{"Method": "POST", "Path": "/plugins/" + PluginID + "/validate"},
@@ -124,15 +124,15 @@ func (p *RPC) handleManagement(req managementRequest) managementResponse {
 		}
 		return managementJSON(http.StatusOK, map[string]bool{"valid": true})
 	case "POST catalog":
-		var input struct {
-			ClientKey string `json:"client_key"`
+		var input APIConfig
+		if len(req.Body) > 1<<20 || json.Unmarshal(req.Body, &input) != nil {
+			return managementJSON(http.StatusBadRequest, map[string]string{"error": "API 配置无效"})
 		}
-		if len(req.Body) > 16384 || json.Unmarshal(req.Body, &input) != nil || strings.TrimSpace(input.ClientKey) == "" || strings.ContainsAny(input.ClientKey, "\r\n") {
-			return managementJSON(http.StatusBadRequest, map[string]string{"error": "请输入 CPA 客户端 API Key"})
+		if err := input.Validate(); err != nil {
+			return managementJSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
 		}
-		headers := http.Header{"Authorization": []string{"Bearer " + input.ClientKey}}
-		cfg := p.Manager.Status().Config
-		c, err := fetchCatalog(context.Background(), cfg, headers, "")
+		headers := http.Header{"Authorization": []string{"Bearer " + input.APIKey}}
+		c, err := fetchCatalog(context.Background(), input, headers, "")
 		if err != nil {
 			if ae, ok := err.(*apiError); ok {
 				return managementJSON(ae.Status, map[string]string{"error": ae.Message})
@@ -140,7 +140,7 @@ func (p *RPC) handleManagement(req managementRequest) managementResponse {
 			return managementJSON(http.StatusBadGateway, map[string]string{"error": "获取目录失败"})
 		}
 		var warnings []string
-		for _, mapping := range cfg.Mappings {
+		for _, mapping := range input.Mappings {
 			if err := c.validateMapping(mapping); err != nil {
 				warnings = append(warnings, err.Error())
 			}
@@ -148,7 +148,7 @@ func (p *RPC) handleManagement(req managementRequest) managementResponse {
 		entries := make([]map[string]string, 0, len(c.models))
 		for _, model := range c.models {
 			var id, name string
-			_ = json.Unmarshal(model["slug"], &id)
+			_ = json.Unmarshal(model[c.idKey], &id)
 			_ = json.Unmarshal(model["display_name"], &name)
 			if id != "" {
 				entries = append(entries, map[string]string{"id": id, "name": name})

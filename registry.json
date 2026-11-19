@@ -2,15 +2,15 @@
   "schema_version": 1,
   "plugins": [
     {
-      "id": "cpa-omp-adapter",
-      "name": "CPA OMP Adapter",
-      "description": "通过现有 CPA 地址为 oh-my-pi 提供 Codex 模型发现、模型映射和可视化配置。",
+      "id": "cpa-api-adapter",
+      "name": "CPA API Adapter",
+      "description": "按 API Key 独立配置路由、OpenAI / Codex 出口和模型白名单。",
       "author": "azmiao",
-      "version": "0.1.4",
-      "repository": "https://github.com/azmiao/cpa_omp_adapter",
-      "homepage": "https://github.com/azmiao/cpa_omp_adapter",
+      "version": "0.2.0",
+      "repository": "https://github.com/azmiao/cpa_api_adapter",
+      "homepage": "https://github.com/azmiao/cpa_api_adapter",
       "license": "MIT",
-      "tags": ["Codex", "OMP", "Management", "Model Mapping"]
+      "tags": ["OpenAI", "Codex", "Management", "Model Mapping"]
     }
   ]
 }

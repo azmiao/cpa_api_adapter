@@ -3,10 +3,14 @@ package adapter
 import (
 	"bufio"
 	"bytes"
+	"crypto/subtle"
 	"encoding/json"
 	"io"
+	"mime"
+	"mime/multipart"
 	"net/http"
 	"net/http/httputil"
+	"path"
 	"strconv"
 	"strings"
 )
@@ -18,15 +22,42 @@ func (m *Manager) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer m.active.Done()
-	base := cfg.BasePath()
+	var api *APIConfig
+	for i := range cfg.APIs {
+		candidate := &cfg.APIs[i]
+		suffix, matches := strings.CutPrefix(r.URL.Path, candidate.Prefix)
+		formatPath := "/v1/"
+		if candidate.Format == "backend-api" {
+			formatPath = "/backend-api/"
+		}
+		if matches && strings.HasPrefix(suffix, formatPath) && (api == nil || len(candidate.Prefix) > len(api.Prefix)) {
+			api = candidate
+		}
+	}
+	if api == nil {
+		http.NotFound(w, r)
+		return
+	}
+	if !authenticate(r.Header, api.APIKey) {
+		writeError(w, &apiError{http.StatusUnauthorized, "API Key 无效或不属于此路由"})
+		return
+	}
+	if path.Clean(r.URL.Path) != r.URL.Path {
+		writeError(w, &apiError{http.StatusBadRequest, "请求路径必须是规范路径"})
+		return
+	}
+	r.Header.Set("Authorization", "Bearer "+api.APIKey)
+	r.Header.Del("X-Api-Key")
+	r.Header.Del("X-Goog-Api-Key")
+	suffix := r.URL.Path[len(api.Prefix)+len(api.Format)+1:]
 	switch {
-	case r.Method == http.MethodGet && (r.URL.Path == base+"/codex/models" || r.URL.Path == base+"/models"):
-		c, err := fetchCatalog(r.Context(), cfg, r.Header, r.URL.RawQuery)
+	case r.Method == http.MethodGet && (suffix == "/models" || api.Format == "backend-api" && suffix == "/codex/models"):
+		c, err := fetchCatalog(r.Context(), *api, r.Header, r.URL.RawQuery)
 		if err != nil {
 			writeError(w, err)
 			return
 		}
-		body, _, err := c.render(cfg)
+		body, _, err := c.render(*api)
 		if err != nil {
 			writeError(w, err)
 			return
@@ -34,16 +65,38 @@ func (m *Manager) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.Header().Set("Cache-Control", "no-store")
 		_, _ = w.Write(body)
-	case r.Method == http.MethodGet && r.URL.Path == base+"/codex/responses":
-		m.proxyWebSocket(w, r, cfg, generation)
-	case r.Method == http.MethodPost && (r.URL.Path == base+"/codex/responses" || r.URL.Path == base+"/codex/responses/compact"):
-		m.proxyResponse(w, r, cfg)
+	case r.Method == http.MethodGet && (api.Format == "v1" && suffix == "/responses" || api.Format == "backend-api" && suffix == "/codex/responses"):
+		m.proxyWebSocket(w, r, cfg, *api, generation)
+	case api.Format == "v1":
+		m.proxyResponse(w, r, cfg, *api)
+	case r.Method == http.MethodPost && (suffix == "/codex/responses" || suffix == "/codex/responses/compact"):
+		m.proxyResponse(w, r, cfg, *api)
 	default:
 		http.NotFound(w, r)
 	}
 }
 
-func (m *Manager) proxyResponse(w http.ResponseWriter, r *http.Request, cfg Config) {
+func authenticate(headers http.Header, expected string) bool {
+	found := false
+	for _, name := range []string{"Authorization", "X-Api-Key", "X-Goog-Api-Key"} {
+		for _, value := range headers.Values(name) {
+			if name == "Authorization" {
+				parts := strings.Fields(value)
+				if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") {
+					return false
+				}
+				value = parts[1]
+			}
+			if subtle.ConstantTimeCompare([]byte(value), []byte(expected)) != 1 {
+				return false
+			}
+			found = true
+		}
+	}
+	return found
+}
+
+func (m *Manager) proxyResponse(w http.ResponseWriter, r *http.Request, cfg Config, api APIConfig) {
 	limit := int64(cfg.MaxBodyMB) << 20
 	if r.ContentLength > limit {
 		writeError(w, &apiError{http.StatusRequestEntityTooLarge, "请求体超过配置的大小限制"})
@@ -51,7 +104,7 @@ func (m *Manager) proxyResponse(w http.ResponseWriter, r *http.Request, cfg Conf
 	}
 	var mapped Model
 	var changed bool
-	if len(cfg.Mappings) != 0 {
+	if len(api.Mappings) != 0 && r.Method != http.MethodGet && r.Method != http.MethodDelete {
 		body, err := io.ReadAll(io.LimitReader(r.Body, limit+1))
 		if err != nil {
 			writeError(w, &apiError{http.StatusBadRequest, "请求体读取失败"})
@@ -61,7 +114,7 @@ func (m *Manager) proxyResponse(w http.ResponseWriter, r *http.Request, cfg Conf
 			writeError(w, &apiError{http.StatusRequestEntityTooLarge, "请求体超过配置的大小限制"})
 			return
 		}
-		body, mapped, changed, err = rewriteRequest(r, cfg, body)
+		body, mapped, changed, err = rewriteBody(r, api, body)
 		if err != nil {
 			writeError(w, err)
 			return
@@ -72,12 +125,21 @@ func (m *Manager) proxyResponse(w http.ResponseWriter, r *http.Request, cfg Conf
 	} else {
 		r.Body = http.MaxBytesReader(w, r.Body, limit)
 	}
-	upstreamPath := strings.TrimPrefix(r.URL.Path, cfg.BasePath())
+	upstreamPath := r.URL.Path[len(api.Prefix)+len(api.Format)+1:]
+	if api.Format == "v1" && strings.HasPrefix(upstreamPath, "/models/") && len(api.Mappings) > 0 {
+		mapping, ok := api.Mapping(strings.TrimPrefix(upstreamPath, "/models/"))
+		if !ok {
+			writeError(w, &apiError{http.StatusNotFound, "模型未对当前 API 开放"})
+			return
+		}
+		upstreamPath = "/models/" + mapping.Target
+		mapped, changed = mapping, mapping.ID != mapping.Target
+	}
 	proxy := &httputil.ReverseProxy{
 		Transport:     localTransport,
 		FlushInterval: -1,
 		Rewrite: func(pr *httputil.ProxyRequest) {
-			u := targetURL(cfg, "/backend-api"+upstreamPath, pr.In.URL.RawQuery)
+			u := targetURL(api, "/"+api.Format+upstreamPath, pr.In.URL.RawQuery)
 			pr.SetURL(u)
 			pr.Out.URL.Path = u.Path
 			pr.Out.URL.RawPath = ""
@@ -96,25 +158,117 @@ func (m *Manager) proxyResponse(w http.ResponseWriter, r *http.Request, cfg Conf
 	proxy.ServeHTTP(w, r)
 }
 
-func rewriteRequest(r *http.Request, cfg Config, body []byte) ([]byte, Model, bool, error) {
+func resolveModel(r *http.Request, cfg APIConfig, id string) (Model, bool, error) {
+	mapping, ok := cfg.Mapping(id)
+	if !ok {
+		return Model{}, false, &apiError{http.StatusNotFound, "模型未对当前 API 开放"}
+	}
+	if mapping.ID == mapping.Target {
+		return mapping, false, nil
+	}
+	c, err := fetchCatalog(r.Context(), cfg, r.Header, r.URL.RawQuery)
+	if err != nil {
+		return Model{}, false, err
+	}
+	if err := c.validateMapping(mapping); err != nil {
+		return Model{}, false, err
+	}
+	return mapping, true, nil
+}
+
+func rewriteBody(r *http.Request, cfg APIConfig, body []byte) ([]byte, Model, bool, error) {
+	mediaType, params, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	if r.Header.Get("Content-Type") == "" || err == nil && mediaType == "application/json" {
+		return rewriteRequest(r, cfg, body)
+	}
+	if err != nil || mediaType != "multipart/form-data" || params["boundary"] == "" {
+		return nil, Model{}, false, &apiError{http.StatusUnsupportedMediaType, "模型白名单接口仅支持 JSON 或 multipart/form-data"}
+	}
+	reader := multipart.NewReader(bytes.NewReader(body), params["boundary"])
+	var id string
+	found := false
+	for {
+		part, err := reader.NextPart()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, Model{}, false, &apiError{http.StatusBadRequest, "multipart 请求无效"}
+		}
+		if part.FormName() == "model" {
+			if found || part.FileName() != "" {
+				return nil, Model{}, false, &apiError{http.StatusBadRequest, "model 字段必须唯一且不能是文件"}
+			}
+			value, err := io.ReadAll(part)
+			if err != nil {
+				return nil, Model{}, false, &apiError{http.StatusBadRequest, "model 字段读取失败"}
+			}
+			id, found = string(value), true
+		}
+	}
+	if !found {
+		return nil, Model{}, false, &apiError{http.StatusBadRequest, "请求必须指定模型"}
+	}
+	mapping, changed, err := resolveModel(r, cfg, id)
+	if err != nil || !changed {
+		return body, mapping, changed, err
+	}
+	reader = multipart.NewReader(bytes.NewReader(body), params["boundary"])
+	var output bytes.Buffer
+	output.Grow(len(body) + len(mapping.Target) - len(mapping.ID))
+	writer := multipart.NewWriter(&output)
+	if err := writer.SetBoundary(params["boundary"]); err != nil {
+		return nil, Model{}, false, &apiError{http.StatusBadRequest, "multipart boundary 无效"}
+	}
+	for {
+		part, err := reader.NextPart()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, Model{}, false, &apiError{http.StatusBadRequest, "multipart 请求无效"}
+		}
+		destination, err := writer.CreatePart(part.Header)
+		if err != nil {
+			return nil, Model{}, false, err
+		}
+		if part.FormName() == "model" {
+			_, err = io.WriteString(destination, mapping.Target)
+		} else {
+			_, err = io.Copy(destination, part)
+		}
+		if err != nil {
+			return nil, Model{}, false, err
+		}
+	}
+	if err := writer.Close(); err != nil {
+		return nil, Model{}, false, err
+	}
+	return output.Bytes(), mapping, true, nil
+}
+
+func rewriteRequest(r *http.Request, cfg APIConfig, body []byte) ([]byte, Model, bool, error) {
+	if len(cfg.Mappings) == 0 {
+		return body, Model{}, false, nil
+	}
 	decoder := json.NewDecoder(bytes.NewReader(body))
 	token, err := decoder.Token()
 	if err != nil || token != json.Delim('{') {
-		return body, Model{}, false, nil
+		return nil, Model{}, false, &apiError{http.StatusBadRequest, "请求必须是有效的 JSON 对象"}
 	}
 	object := make(map[string]json.RawMessage)
 	for decoder.More() {
 		keyToken, err := decoder.Token()
 		if err != nil {
-			return body, Model{}, false, nil
+			return nil, Model{}, false, &apiError{http.StatusBadRequest, "请求 JSON 无效"}
 		}
 		key, ok := keyToken.(string)
 		if !ok {
-			return body, Model{}, false, nil
+			return nil, Model{}, false, &apiError{http.StatusBadRequest, "请求 JSON 无效"}
 		}
 		var value json.RawMessage
 		if err := decoder.Decode(&value); err != nil {
-			return body, Model{}, false, nil
+			return nil, Model{}, false, &apiError{http.StatusBadRequest, "请求 JSON 无效"}
 		}
 		if _, exists := object[key]; exists {
 			return nil, Model{}, false, &apiError{http.StatusBadRequest, "请求包含重复的 JSON 字段"}
@@ -122,29 +276,19 @@ func rewriteRequest(r *http.Request, cfg Config, body []byte) ([]byte, Model, bo
 		object[key] = value
 	}
 	if _, err := decoder.Token(); err != nil {
-		return body, Model{}, false, nil
+		return nil, Model{}, false, &apiError{http.StatusBadRequest, "请求 JSON 无效"}
 	}
 	var trailing json.RawMessage
 	if err := decoder.Decode(&trailing); err != io.EOF {
-		return body, Model{}, false, nil
+		return nil, Model{}, false, &apiError{http.StatusBadRequest, "请求 JSON 无效"}
 	}
 	var id string
-	if json.Unmarshal(object["model"], &id) != nil {
-		return body, Model{}, false, nil
+	if json.Unmarshal(object["model"], &id) != nil || id == "" {
+		return nil, Model{}, false, &apiError{http.StatusBadRequest, "请求必须指定模型"}
 	}
-	mapping, ok := cfg.Mapping(id)
-	if !ok {
-		return body, Model{}, false, nil
-	}
-	if mapping.ID == mapping.Target {
-		return body, mapping, false, nil
-	}
-	c, err := fetchCatalog(r.Context(), cfg, r.Header, r.URL.RawQuery)
-	if err != nil {
-		return nil, Model{}, false, err
-	}
-	if err := c.validateMapping(mapping); err != nil {
-		return nil, Model{}, false, err
+	mapping, changed, err := resolveModel(r, cfg, id)
+	if err != nil || !changed {
+		return body, mapping, changed, err
 	}
 	object["model"], _ = json.Marshal(mapping.Target)
 	updated, err := json.Marshal(object)
@@ -176,11 +320,16 @@ func restoreJSON(body []byte, mapping Model) []byte {
 }
 
 func replaceModel(object map[string]json.RawMessage, mapping Model) bool {
+	key := "model"
+	var kind string
+	if json.Unmarshal(object["object"], &kind) == nil && kind == "model" {
+		key = "id"
+	}
 	var model string
-	if json.Unmarshal(object["model"], &model) != nil || model != mapping.Target {
+	if json.Unmarshal(object[key], &model) != nil || model != mapping.Target {
 		return false
 	}
-	object["model"], _ = json.Marshal(mapping.ID)
+	object[key], _ = json.Marshal(mapping.ID)
 	return true
 }
 

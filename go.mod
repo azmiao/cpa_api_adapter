@@ -1,4 +1,4 @@
-module cpa-omp-adapter
+module cpa-api-adapter
 
 go 1.24.0
 
