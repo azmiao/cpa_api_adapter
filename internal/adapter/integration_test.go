@@ -247,10 +247,34 @@ func TestConfigurationRejectsUnsafeSettings(t *testing.T) {
 	if err := cfg.Validate(); err == nil {
 		t.Fatal("adapter prefix accepted as CPA upstream")
 	}
-	cfg = DefaultConfig()
-	cfg.Upstream = "http://example.com:8317"
-	if err := cfg.Validate(); err == nil {
-		t.Fatal("plaintext remote upstream accepted")
+}
+
+func TestConfigurationAllowsRemoteHTTP(t *testing.T) {
+	for _, upstream := range []string{
+		"http://192.168.1.20:8317",
+		"http://cpa.internal:8317",
+		"http://[fd00::1]:8317",
+	} {
+		t.Run(upstream, func(t *testing.T) {
+			cfg := DefaultConfig()
+			cfg.Upstream = upstream
+			cfg.PublicBaseURL = "http://example.com/omp/backend-api"
+			data, err := json.Marshal(cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := ParseConfig(data); err != nil {
+				t.Fatalf("saved configuration rejected: %v", err)
+			}
+			response := (&RPC{Manager: NewManager()}).handleManagement(managementRequest{
+				Method: http.MethodPost,
+				Path:   "/v0/management/plugins/cpa-omp-adapter/validate",
+				Body:   data,
+			})
+			if response.StatusCode != http.StatusOK {
+				t.Fatalf("management validation rejected configuration: %d %s", response.StatusCode, response.Body)
+			}
+		})
 	}
 }
 
