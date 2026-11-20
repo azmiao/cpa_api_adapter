@@ -37,7 +37,8 @@
 <div id="panel-config" role="tabpanel" aria-labelledby="tab-config"><div class="grid">
 <label>名称<input id="api-name" autocomplete="off"></label>
 <label>出口格式<select id="api-format"><option value="v1">v1</option><option value="backend-api">backend-api</option></select></label>
-<div class="full"><label>API Key<div class="key-row"><input id="api-key" type="password" autocomplete="off" aria-describedby="api-key-hint" required><button id="show-key" type="button" aria-pressed="false">显示</button></div></label><small id="api-key-hint" class="field-hint">填写 CPA 已有的客户端 API Key（非管理密钥）。在 CPA 删除后，此处配置仍保留，但该 Key 会失效。</small></div>
+<div class="full"><label>插件 API Key<div class="key-row"><input id="api-key" type="password" autocomplete="off" aria-describedby="api-key-hint" required><button id="show-key" type="button" aria-pressed="false" aria-controls="api-key">显示</button></div></label><small id="api-key-hint" class="field-hint">给用户使用，仅用于插件鉴权；不得登记在 CPA。已分发的旧 Key 请从 CPA 移除。</small></div>
+<div class="full"><label>CPA 上游 API Key<div class="key-row"><input id="api-upstream-key" type="password" autocomplete="off" aria-describedby="api-upstream-key-hint" required><button id="show-upstream-key" type="button" aria-pressed="false" aria-controls="api-upstream-key">显示</button></div></label><small id="api-upstream-key-hint" class="field-hint">必填：CPA 中独立的私有 API Key（非管理密钥），仅供插件访问 CPA，不得给用户。旧配置请保留插件 API Key，补填此项，并从 CPA 移除已分发的旧 Key。</small></div>
 <label>路由前缀<input id="api-prefix" required placeholder="/work"></label>
 <label>CPA 内部地址<input id="api-upstream" type="url" required placeholder="http://127.0.0.1:8317"></label>
 </div></div>
@@ -60,7 +61,7 @@
 <fieldset id="unix-settings" class="grid full"><label class="full">本地套接字路径<input id="socket-path" required></label><label>套接字权限<select id="socket-mode"><option value="0660">0660</option><option value="0600">0600</option><option value="0666">0666</option></select></label></fieldset>
 <div class="full"><label>实际监听地址</label><code id="listen-status">未监听</code></div>
 <label>请求/消息上限（MB）<input id="max-body" type="number" min="1" max="512" step="1" required><small class="field-hint">限制请求体、改写响应、SSE 事件和 WebSocket 消息。</small></label>
-</div><div class="notice">API Key 保存在 CPA 配置文件中；管理密钥仅保存在当前页面内存中。</div></section>
+</div><div class="notice">插件 API Key 和 CPA 上游 API Key 保存在 CPA 配置文件中；管理密钥仅保存在当前页面内存中，用于管理操作。</div></section>
 <div id="message" class="feedback" role="status" aria-live="polite"></div>
 <div class="actions"><span id="save-state">已保存</span><button id="save" class="primary" type="button">保存全部</button></div>
 </div>
@@ -168,7 +169,12 @@ function collectMappings(){return [...$('mappings').children].map(node=>{
   const levels=[...node.querySelectorAll('input[type=checkbox]:checked')].map(input=>input.value);if(levels.length)item.reasoning_levels=levels;
   return item;
 });}
-function storeActive(){if(active<0)return;Object.assign(apis[active],{name:$('api-name').value.trim(),api_key:$('api-key').value.trim(),prefix:$('api-prefix').value.trim(),upstream:$('api-upstream').value.trim().replace(/\/$/,''),format:$('api-format').value,mappings:collectMappings()});}
+function storeActive(){
+  if(active<0)return;
+  const item=apis[active],upstreamKey=$('api-upstream-key').value,upstream=$('api-upstream').value.trim().replace(/\/$/,''),format=$('api-format').value;
+  if(item.upstream_api_key!==upstreamKey||item.upstream!==upstream||item.format!==format){catalogs.delete(item);message('catalog-message','');}
+  Object.assign(item,{name:$('api-name').value.trim(),api_key:$('api-key').value.trim(),upstream_api_key:upstreamKey,prefix:$('api-prefix').value.trim(),upstream,format,mappings:collectMappings()});
+}
 function collect(){storeActive();return {listen_mode:$('listen-mode').value,listen_address:$('listen-address').value.trim(),socket_path:$('socket-path').value.trim(),socket_mode:$('socket-mode').value,max_body_mb:Number($('max-body').value),apis:structuredClone(apis)};}
 function renderAPIs(){
   $('api-list').replaceChildren();apis.forEach((item,i)=>{
@@ -180,8 +186,8 @@ function renderAPIs(){
 }
 function showAPI(i){
   closeSelect();active=i;$('no-api').hidden=i>=0;$('api-editor').hidden=i<0;renderAPIs();if(i<0)return;
-  const item=apis[i];for(const [id,key] of [['api-name','name'],['api-key','api_key'],['api-prefix','prefix'],['api-upstream','upstream'],['api-format','format']])$(id).value=item[key]||'';syncSelect($('api-format'));
-  $('api-key').type='password';$('show-key').textContent='显示';$('show-key').setAttribute('aria-pressed','false');
+  const item=apis[i];for(const [id,key] of [['api-name','name'],['api-key','api_key'],['api-upstream-key','upstream_api_key'],['api-prefix','prefix'],['api-upstream','upstream'],['api-format','format']])$(id).value=item[key]||'';syncSelect($('api-format'));
+  for(const [input,button] of [['api-key','show-key'],['api-upstream-key','show-upstream-key']]){$(input).type='password';$(button).textContent='显示';$(button).setAttribute('aria-pressed','false');}
   $('mappings').replaceChildren();for(const model of item.mappings||[])addMapping(model);
   $('model-filter').value='';catalogLimit=50;message('catalog-message','');message('copy-message','');updateMappings();address();
 }
@@ -192,7 +198,7 @@ function addMapping(model={}){
   node.querySelector('.remove').addEventListener('click',()=>{if(openSelect&&node.contains(openSelect.wrapper))closeSelect();node.remove();storeActive();changed();updateMappings();});$('mappings').append(node);node.querySelectorAll('select').forEach(enhanceSelect);updateMappings();return node;
 }
 function updateMappings(){[...$('mappings').children].forEach((node,i)=>node.querySelector('.mapping-title').textContent='模型 '+(i+1));$('empty-models').hidden=$('mappings').children.length>0;renderCatalog();}
-function fingerprint(item){return JSON.stringify([item.api_key,item.upstream,item.format]);}
+function fingerprint(item){return JSON.stringify([item.upstream_api_key,item.upstream,item.format]);}
 function renderCatalog(){
   const entry=active<0?null:catalogs.get(apis[active]);const valid=entry&&entry.fingerprint===fingerprint(apis[active]);$('catalog-results').hidden=!valid;if(!valid)return;
   const query=$('model-filter').value.trim().toLocaleLowerCase();const filtered=entry.models.filter(model=>(model.id+' '+model.name).toLocaleLowerCase().includes(query));
@@ -236,18 +242,29 @@ function address(){
   }
   $('copy-proxy').disabled=false;
 }
-function populate(cfg){$('listen-mode').value=cfg.listen_mode||'unix';$('listen-address').value=cfg.listen_address||'127.0.0.1:18318';$('socket-path').value=cfg.socket_path;$('socket-mode').value=cfg.socket_mode;$('max-body').value=cfg.max_body_mb;apis=structuredClone(cfg.apis||[]);$('proxy-type').value=$('listen-mode').value==='unix'&&/^[A-Za-z]:[\\/]/.test(cfg.socket_path)?'caddy':'nginx';for(const id of ['listen-mode','socket-mode','proxy-type'])syncSelect($(id));syncListenerSettings();showAPI(apis.length?0:-1);dirty=false;$('save-state').textContent='已保存';}
-$('login-form').addEventListener('submit',async event=>{event.preventDefault();managementKey=$('management-key').value;message('login-message','');try{const status=await api(management+'status',{timeout:15000});$('management-key').value='';populate(status.config);setStatus(status);$('login-card').hidden=true;$('app').hidden=false;startStatusPolling();if(status.error)message('message',status.error);}catch(error){managementKey='';message('login-message',error.message);}});
-$('add-api').addEventListener('click',()=>{storeActive();apis.push({name:'',api_key:'',prefix:'',upstream:'http://127.0.0.1:8317',format:'v1',mappings:[]});showAPI(apis.length-1);selectTab($('tab-config'));changed();$('api-name').focus();});
+function populate(cfg){$('listen-mode').value=cfg.listen_mode||'unix';$('listen-address').value=cfg.listen_address||'127.0.0.1:18318';$('socket-path').value=cfg.socket_path;$('socket-mode').value=cfg.socket_mode;$('max-body').value=cfg.max_body_mb;apis=structuredClone(cfg.apis||[]);$('proxy-type').value=$('listen-mode').value==='unix'&&/^[A-Za-z]:[\\/]/.test(cfg.socket_path)?'caddy':'nginx';for(const id of ['listen-mode','socket-mode','proxy-type'])syncSelect($(id));syncListenerSettings();showAPI(apis.length?0:-1);dirty=false;$('save-state').textContent='已保存';const missing=apis.filter(item=>!item.upstream_api_key).length;message('message',missing?'有 '+missing+' 条 API 缺少 CPA 上游 API Key：请保留插件 API Key，补填独立上游 Key，并从 CPA 移除已分发的旧 Key。':'');}
+$('login-form').addEventListener('submit',async event=>{event.preventDefault();managementKey=$('management-key').value;message('login-message','');try{const status=await api(management+'status',{timeout:15000});$('management-key').value='';populate(status.config);setStatus(status);$('login-card').hidden=true;$('app').hidden=false;startStatusPolling();if(status.error)message('message',[$('message').textContent,status.error].filter(Boolean).join('\n'));}catch(error){managementKey='';message('login-message',error.message);}});
+$('add-api').addEventListener('click',()=>{storeActive();apis.push({name:'',api_key:'',upstream_api_key:'',prefix:'',upstream:'http://127.0.0.1:8317',format:'v1',mappings:[]});showAPI(apis.length-1);selectTab($('tab-config'));changed();$('api-name').focus();});
 $('remove-api').addEventListener('click',()=>{if(!confirm('删除当前 API？保存后生效。'))return;apis.splice(active,1);showAPI(apis.length?Math.min(active,apis.length-1):-1);changed();});
-$('show-key').addEventListener('click',()=>{const shown=$('api-key').type==='password';$('api-key').type=shown?'text':'password';$('show-key').textContent=shown?'隐藏':'显示';$('show-key').setAttribute('aria-pressed',String(shown));});
+for(const [button,input] of [['show-key','api-key'],['show-upstream-key','api-upstream-key']])$(button).addEventListener('click',()=>{const shown=$(input).type==='password';$(input).type=shown?'text':'password';$(button).textContent=shown?'隐藏':'显示';$(button).setAttribute('aria-pressed',String(shown));});
 $('add-model').addEventListener('click',()=>{addMapping();storeActive();changed();});
 $('app').addEventListener('input',event=>{if(event.target.id==='model-filter'||event.target.tagName==='SELECT')return;if(event.target.id==='listen-address')syncListenerSettings();storeActive();changed();renderAPIs();renderCatalog();address();});
 $('app').addEventListener('change',event=>{if(event.target.tagName==='SELECT'){if(event.target.id==='listen-mode')syncListenerSettings();if(event.target.id==='proxy-type'){address();return;}storeActive();changed();renderAPIs();renderCatalog();address();}});
 $('model-filter').addEventListener('input',()=>{catalogLimit=50;renderCatalog();});$('show-more').addEventListener('click',()=>{catalogLimit+=50;renderCatalog();});
+function keyError(items,allItems=items){
+  for(const item of items){
+    const name=item.name||'API '+(allItems.indexOf(item)+1);
+    if(!item.api_key)return name+'：请填写插件 API Key（仅给用户使用）';
+    if(!item.upstream_api_key)return name+'：请补填独立的 CPA 上游 API Key；保留插件 API Key，并从 CPA 移除已分发的旧 Key。';
+    if(/\s/.test(item.upstream_api_key))return name+'：CPA 上游 API Key 不得包含空白字符';
+  }
+  const upstreamKeys=new Set(allItems.map(item=>item.upstream_api_key).filter(Boolean));
+  for(const [i,item] of allItems.entries())if(upstreamKeys.has(item.api_key))return (item.name||'API '+(i+1))+'：插件 API Key 不得与任何 API 的 CPA 上游 API Key 相同';
+  return '';
+}
 $('load-models').addEventListener('click',async()=>{
-  storeActive();const item=apis[active],request=structuredClone(item),source=fingerprint(item),button=$('load-models');button.disabled=true;message('catalog-message','正在获取模型…',true);
-  try{const result=await api(management+'catalog',{method:'POST',body:JSON.stringify(request)});if(apis[active]!==item||fingerprint(item)!==source)return;if(!Array.isArray(result.models))throw new Error('模型目录格式无效');catalogs.set(item,{fingerprint:source,models:result.models});catalogLimit=50;renderCatalog();message('catalog-message',(result.warnings||[]).join('；'),!(result.warnings||[]).length);}catch(error){if(apis[active]===item){catalogs.delete(item);renderCatalog();message('catalog-message',error.message);}}finally{button.disabled=false;}
+  storeActive();const item=apis[active],validationError=keyError([item],apis);if(validationError){message('catalog-message',validationError);return;}const request=structuredClone(item),source=fingerprint(item),button=$('load-models');button.disabled=true;message('catalog-message','正在获取模型…',true);
+  try{const result=await api(management+'catalog',{method:'POST',body:JSON.stringify(request)});if(apis[active]!==item||fingerprint(item)!==source)return;if(!Array.isArray(result.models))throw new Error('模型目录格式无效');catalogs.set(item,{fingerprint:source,models:result.models});catalogLimit=50;renderCatalog();message('catalog-message',(result.warnings||[]).join('；'),!(result.warnings||[]).length);}catch(error){if(apis[active]===item&&fingerprint(item)===source){catalogs.delete(item);renderCatalog();message('catalog-message',error.message);}}finally{button.disabled=false;}
 });
 async function copyElement(id){
   const text=$(id).textContent;let copied=false;
@@ -259,12 +276,13 @@ async function copyElement(id){
   message('copy-message',copied?'已复制':'内容已选中，请手动复制',copied);
 }
 $('copy-url').addEventListener('click',()=>copyElement('base-url'));$('copy-proxy').addEventListener('click',()=>copyElement('proxy-snippet'));
-function normalize(cfg){return {listen_mode:cfg.listen_mode||'unix',listen_address:cfg.listen_address||'127.0.0.1:18318',socket_path:cfg.socket_path,socket_mode:cfg.socket_mode,max_body_mb:cfg.max_body_mb,apis:(cfg.apis||[]).map(item=>({name:item.name||'',api_key:item.api_key,upstream:item.upstream,prefix:item.prefix,format:item.format,mappings:(item.mappings||[]).map(model=>({id:model.id,target:model.target,display_name:model.display_name||'',context_window:model.context_window||0,max_context_window:model.max_context_window||0,max_tokens:model.max_tokens||0,input_modalities:model.input_modalities||[],reasoning_levels:model.reasoning_levels||[],default_reasoning:model.default_reasoning||''}))}))};}
+function normalize(cfg){return {listen_mode:cfg.listen_mode||'unix',listen_address:cfg.listen_address||'127.0.0.1:18318',socket_path:cfg.socket_path,socket_mode:cfg.socket_mode,max_body_mb:cfg.max_body_mb,apis:(cfg.apis||[]).map(item=>({name:item.name||'',api_key:item.api_key,upstream_api_key:item.upstream_api_key,upstream:item.upstream,prefix:item.prefix,format:item.format,mappings:(item.mappings||[]).map(model=>({id:model.id,target:model.target,display_name:model.display_name||'',context_window:model.context_window||0,max_context_window:model.max_context_window||0,max_tokens:model.max_tokens||0,input_modalities:model.input_modalities||[],reasoning_levels:model.reasoning_levels||[],default_reasoning:model.default_reasoning||''}))}))};}
 $('save').addEventListener('click',async()=>{
   if(!$('max-body').reportValidity())return;
+  const cfg=collect(),validationError=keyError(cfg.apis);if(validationError){message('message',validationError);return;}
   const button=$('save');button.disabled=true;saving=true;stopStatusPolling();message('message','正在保存…',true);
   try{
-    const cfg=collect(),savedRevision=revision;await api(management+'validate',{method:'POST',body:JSON.stringify(cfg)});await api(configURL,{method:'PATCH',body:JSON.stringify(cfg)});
+    const savedRevision=revision;await api(management+'validate',{method:'POST',body:JSON.stringify(cfg)});await api(configURL,{method:'PATCH',body:JSON.stringify(cfg)});
     const expected=JSON.stringify(normalize(cfg)),deadline=performance.now()+6000;let last,confirmed=false;
     while(performance.now()<deadline){
       await new Promise(resolve=>setTimeout(resolve,Math.min(500,deadline-performance.now())));
