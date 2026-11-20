@@ -162,6 +162,8 @@ services:
 
 3. 在当前 API 的「接入」页选择 Caddy 或 Nginx，点击「复制配置」。放入已有反代站点，保留原有 CPA 转发规则，检查配置后重载反代。
 
+   Nginx 片段中的 `map` / `upstream` 放在 `http {}` 内，同一套接字只添加一次；各 API 的 `location` 放在站点的 `server {}` 内。共享连接池使用 `keepalive 32`，普通 HTTP 请求不再强制关闭连接。
+
 ![Unix 模式选择代理软件并复制生成的反代配置；图中为填写示例的预览](docs/images/13-unix-proxy-copy.png)
 
 相同 Base URL 的多个 Key **只需一份反代规则**；其他路径的 API 再增加对应规则。保存后在「设置」确认实际监听状态，目录挂载与权限正确后反代才能连接。
@@ -197,6 +199,17 @@ services:
 <summary>反代服务器 Nginx 示例</summary>
 
 ```text
+# map/upstream 放在 http {} 内，只添加一次。
+map $http_upgrade $cpa_adapter_connection {
+    default upgrade;
+    '' '';
+}
+
+upstream cpa_adapter_remote {
+    server x.x.x.x:18318;                  # 替换为 CPA 宿主机 IP 与插件发布端口
+    keepalive 32;
+}
+
 server
 {
   listen 80 ;
@@ -204,7 +217,16 @@ server
   server_name cpa.xxxxx.com;               # 替换为自己的域名
 
   location ^~ /adapter/ {                  # 替换为自己想要的代理前缀
-      proxy_pass http://x.x.x.x:18318/;    # x.x.x.x 替换为CPA所在服务器，18318替换为插件对外暴露的端口
+      proxy_pass http://cpa_adapter_remote/;
+      proxy_http_version 1.1;
+      proxy_set_header Upgrade $http_upgrade;
+      proxy_set_header Connection $cpa_adapter_connection;
+      client_max_body_size 32m;           # 按插件的请求/消息上限调整
+      proxy_buffering off;
+      proxy_cache off;
+      proxy_request_buffering off;
+      proxy_read_timeout 3600s;
+      proxy_send_timeout 3600s;
   }
   
   location / {
@@ -257,6 +279,17 @@ providers:
 
 插件提供 Codex 风格目录、模型别名与能力配置，以及 Responses 的 HTTP / SSE / WebSocket 和 compact 转发。上游仍须支持相应模型与接口；**不会把 Chat Completions 转换为 Responses**。
 
+## 转发边界与性能
+
+- WebSocket 只允许 `/v1/responses` 和 `/backend-api/codex/responses` 这两个专用入口；其他路径的协议升级会被拒绝，不作为透明隧道转发。
+- 每条 WebSocket 连接最多一个未完成的 `response.create`，并发第二次创建返回 `409`。上游确认接受前，`append` 等后续事件也返回 `409`，避免其错误被误认为创建失败；确认后的活动响应 `append` 不增加轮次，也不能更换模型。后续请求可继承最后由上游确认接受的模型。
+- 配置了模型白名单时，已有 Responses 资源按实际上游 `model` 核验后才能读取。`input_items`、取消、删除及 HEAD 操作会先检查主资源；无法确认模型时拒绝访问。同一目标有多个别名时，资源展示使用配置中的第一个别名。未配置白名单仍开放全部模型。
+- 模型目录按上游、Key、账号、客户端相关请求头及查询参数隔离，缓存 **15 秒**并合并同键并发请求；不缓存失败或返回过期数据。缓存最多 256 项、约 32 MiB 保守内存预算，最多 32 个实际目录请求同时运行；达到并发上限时新键请求返回 `503`。配置变更和停止插件会使缓存失效。目录缓存不替代 CPA 对推理请求的鉴权。
+- 「请求/消息上限」用于请求体、读取的改写 JSON 响应、完整 SSE 事件和 WebSocket 消息。未知长度请求超过上限返回 `413`。大 multipart 上传先有界暂存并完整核验模型，再向上游发送，临时文件会在请求结束或失败时清理；JSON 请求只索引顶层字段，不复制整个输入内容来解析模型。
+- SSE 按完整事件改写并立即发送，不按单行反复 flush，也不等待后续事件攒批次；保留多行 `data`、换行形式、用户文本和大整数。改写支持 identity / gzip 响应，其他编码明确失败，不跳过模型检查。
+- 上游拨号与 TLS 握手各限 10 秒，等待响应头限 2 分钟；HTTP 转发输出和 WebSocket 消息每次写入限 30 秒，**不对整个 SSE 会话设置短总超时**。监听服务读取请求限 2 分钟，空闲连接限 90 秒；较慢的大文件上传需留意读取时限。
+- 无法解析或校验失败的新配置不会停止插件现有监听；合法配置因端口占用等原因无法监听时，仍会记录新配置并显示未启动。页面每 5 秒刷新可见状态，获取失败显示「无法确认」，不覆盖未保存表单；保存确认最多等待约 6 秒。
+
 ## 遇到问题
 
 | 现象 | 先检查这里 |
@@ -267,7 +300,7 @@ providers:
 | Unix 反代连不上 | 两个容器是否挂载同一目录？CPA 能否写入、反代是否具有套接字访问权限？ |
 | TCP 远端连不上 | 反代连接的是 CPA 宿主机 IP:发布端口吗？检查 Docker 端口发布与防火墙。 |
 
-- 在 CPA 删除 Key 后，插件中的 API 配置仍保留，但该 Key 会失效。
+- 在 CPA 删除 Key 后，插件中的 API 配置仍保留，推理请求仍会被 CPA 拒绝；已缓存的模型目录可能继续显示最多 15 秒，配置变更会清空缓存。
 - 模型白名单只限制插件入口；若不希望用户绕过插件，需自行限制直接访问 CPA 原有接口。
 - 旧 `apis[].public_base_url` 在 `v0.4.1` 起加载时自动清理，升级后「保存全部」可写回干净配置。
 
