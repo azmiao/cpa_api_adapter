@@ -1,6 +1,6 @@
 # CPA API Adapter
 
-给 CLIProxyAPI（CPA）增加独立的 API 入口：**给不同 Key 分发不同模型**，或**用 backend-api 接入 oh-my-pi**。
+给 CLIProxyAPI（CPA）增加独立的 API 入口：**给不同 Key 分发不同模型**，或**用 backend-api 补全接口并接入 oh-my-pi**。
 
 已有能正常使用的 CPA？按下面的页面步骤操作即可，**不用手写 CPA 的 YAML 配置**。
 
@@ -140,7 +140,7 @@ flowchart LR
 <details>
 <summary>使用 Docker Compose？展开查看最少需要增加的内容</summary>
 
-在 Compose 所在目录创建 `./cpa-api-socket`，将下面的挂载合并到现有服务，保留原有配置：
+在 Compose 所在目录创建 `./cpa-api-socket`，将下面的挂载合并到现有服务，保留原有配置，注意两个服务挂载的宿主机 cpa-api-socket 目录要同一个，让两个服务都能读取到才行：
 
 ```yaml
 services:
@@ -168,7 +168,9 @@ services:
 
 ### C. CPA 在 Docker，反代在另一台服务器
 
-不同主机不能共用 Unix 套接字，使用 **TCP**：
+> 此方案一般用不到，除非你的CPA所在服务器在境内且未备案，必须用已备案的服务器部署反代连接CPA所在服务器，此时才使用本方案
+
+不同主机一般来说不能共用 Unix 套接字，建议使用 **TCP**：
 
 1. 插件「设置」选 **TCP**，监听地址填 `0.0.0.0:18318`，点击「保存全部」。这里的 `0.0.0.0` 表示监听容器接口，不是给远端反代填写的连接地址。
 2. 在 Docker 管理工具中，把容器 `18318` 端口发布到 CPA 宿主机的内网接口。不要删除 CPA 原有端口。
@@ -176,36 +178,48 @@ services:
 <details>
 <summary>使用 Docker Compose？展开查看端口发布示例</summary>
 
-假设 CPA 宿主机内网 IP 是 `10.0.0.10`，向现有 CPA 服务追加：
+向现有 CPA 服务追加：
 
 ```yaml
 services:
   cli-proxy-api:
     ports:
-      - "10.0.0.10:18318:18318"
+      - "18318:18318"
 ```
 
-换成实际服务名和宿主机 IP，应用 Compose 改动。插件的「CPA 内部地址」通常仍是 `http://127.0.0.1:8317`，不要改为 `18318`。
+换成实际服务名和宿主机所需端口，应用 Compose 改动。插件的「CPA 内部地址」通常仍是 `http://127.0.0.1:8317`，一般来说不需要修改。
 
 </details>
 
-3. **到远端反代服务器配置连接目标**：CPA 宿主机 IP 加发布端口，例如 `10.0.0.10:18318`。不是反代服务器自己的 IP，也不是 `127.0.0.1` 或 `0.0.0.0`。
+3. **到远端反代服务器配置连接目标**：CPA 宿主机增加放行端口 18318
 
 <details>
-<summary>远端 Caddy 示例：放入已有站点块，保留原有 CPA 转发</summary>
+<summary>反代服务器 Nginx 示例</summary>
 
-```caddyfile
-@adapter path /api/v1/* /codex/backend-api/*
-handle @adapter {
-    reverse_proxy 10.0.0.10:18318
+```text
+server
+{
+  listen 80 ;
+  listen 443 ssl ;
+  server_name cpa.xxxxx.com;               # 替换为自己的域名
+
+  location ^~ /adapter/ {                  # 替换为自己想要的代理前缀
+      proxy_pass http://x.x.x.x:18318/;    # x.x.x.x 替换为CPA所在服务器，18318替换为插件对外暴露的端口
+  }
+  
+  location / {
+      proxy_pass http://x.x.x.x:8317/;     # x.x.x.x 替换为CPA所在服务器，8317替换为CPA对外暴露的端口
+  }
 }
 ```
 
-修改 IP 和 API 路径后检查配置、重载 Caddy。Nginx 的 `proxy_pass` 使用 `http://10.0.0.10:18318`，不附加 URI；保留认证头、WebSocket 升级，并关闭 SSE 缓冲和缓存。
+如此配置可让 `https://cpa.xxxxx.com` 访问CPA本体，让 `ttps://cpa.xxxxx.com/adapter` 访问插件转发的 api。
 
 </details>
 
-4. 防火墙只允许反代服务器访问插件端口。客户端使用反代的 HTTPS 域名，不使用容器监听地址。TCP 模式不提供一键反代配置，远端反代由你自行配置。
+4. 防火墙只允许反代服务器访问CPA服务器所用到的插件端口 18318 。客户端使用反代的 HTTPS 域名，不使用容器监听地址。TCP 模式不提供一键反代配置，远端反代由你自行配置。
+
+5. 若按照上面示例配置后，假设插件增加了一个 v1 格式的 API，可用 `http://cpa.xxxxx.com/adapter/{路由前缀}/v1` 替代原有的 `http://cpa.xxxxx.com:18318/{路由前缀}/v1`
 
 ## 4. 把地址交给客户端
 
@@ -259,19 +273,4 @@ providers:
 
 截图来自隔离演示环境：CPA `8.0.78`、官方管理页面 `1.28.3`、插件 `0.4.1`。安装、API 配置及 TCP 模型目录已实际操作；Linux / Docker 的 Unix 图片展示字段填写与反代预览，未在 Docker 中执行部署或调用真实模型推理。
 
-<details>
-<summary>开发者：从源码构建</summary>
-
-需要 Go 1.24+ 和目标平台 C 编译器：
-
-```sh
-go test ./internal/adapter
-CGO_ENABLED=1 go build -trimpath -buildvcs=false -buildmode=c-shared \
-  -o dist/cpa-api-adapter.so ./cmd/cpa-api-adapter
-python scripts/smoke_plugin.py dist/cpa-api-adapter.so 0.4.1
-```
-
-Windows / macOS 使用对应动态库扩展名；Release 工作流负责多平台构建与打包。
-
-</details>
 
