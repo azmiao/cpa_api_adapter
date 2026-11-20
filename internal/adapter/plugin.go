@@ -50,7 +50,6 @@ func (p *RPC) Handle(method string, request []byte) ([]byte, error) {
 		}
 		cfg, err := ParseConfig(req.ConfigYAML)
 		if err != nil {
-			p.Manager.Stop()
 			return nil, err
 		}
 		if err = p.Manager.Configure(cfg); err != nil {
@@ -115,11 +114,10 @@ func (p *RPC) handleManagement(req managementRequest) managementResponse {
 		if len(req.Body) > 1<<20 {
 			return managementJSON(http.StatusRequestEntityTooLarge, map[string]string{"error": "配置过大"})
 		}
-		var cfg Config
-		if err := json.Unmarshal(req.Body, &cfg); err != nil {
-			return managementJSON(http.StatusBadRequest, map[string]string{"error": "配置不是有效的 JSON"})
+		if _, err := jsonObjectFields(req.Body); err != nil {
+			return managementJSON(http.StatusBadRequest, map[string]string{"error": "配置必须是有效的 JSON 对象"})
 		}
-		if err := cfg.Validate(); err != nil {
+		if _, err := ParseConfig(req.Body); err != nil {
 			return managementJSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
 		}
 		return managementJSON(http.StatusOK, map[string]bool{"valid": true})

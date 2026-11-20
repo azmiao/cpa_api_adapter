@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -26,7 +27,17 @@ type catalog struct {
 	idKey   string
 }
 
-var localTransport = &http.Transport{Proxy: nil, MaxIdleConns: 64, MaxIdleConnsPerHost: 16, IdleConnTimeout: 90 * time.Second}
+var localTransport = &http.Transport{
+	Proxy:                 nil,
+	DialContext:           (&net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
+	TLSHandshakeTimeout:   10 * time.Second,
+	ResponseHeaderTimeout: upstreamHeaderTimeout,
+	ExpectContinueTimeout: time.Second,
+	ForceAttemptHTTP2:     true,
+	MaxIdleConns:          64,
+	MaxIdleConnsPerHost:   16,
+	IdleConnTimeout:       90 * time.Second,
+}
 var catalogClient = &http.Client{Transport: localTransport, Timeout: 15 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 
 func targetURL(cfg APIConfig, suffix string, query string) *url.URL {
@@ -59,7 +70,13 @@ func fetchCatalog(ctx context.Context, cfg APIConfig, headers http.Header, query
 		}
 	}
 	req.Header.Set("Accept", "application/json")
-	req.Header.Set("Accept-Encoding", "identity")
+	key := catalogRequestKey(req, cfg)
+	return modelCatalogCache.get(ctx, key, func(loadCtx context.Context) (*catalog, error) {
+		return loadCatalog(req.WithContext(loadCtx), cfg.Format)
+	})
+}
+
+func loadCatalog(req *http.Request, format string) (*catalog, error) {
 	resp, err := catalogClient.Do(req)
 	if err != nil {
 		return nil, &apiError{http.StatusBadGateway, "无法连接 CPA 模型目录，请检查内部地址"}
@@ -76,7 +93,7 @@ func fetchCatalog(ctx context.Context, cfg APIConfig, headers http.Header, query
 		return nil, &apiError{http.StatusBadGateway, "CPA 模型目录读取失败或过大"}
 	}
 	c := &catalog{byID: make(map[string][]map[string]json.RawMessage), listKey: "models", idKey: "slug"}
-	if cfg.Format == "v1" {
+	if format == "v1" {
 		c.listKey, c.idKey = "data", "id"
 	}
 	if json.Unmarshal(body, &c.payload) != nil || json.Unmarshal(c.payload[c.listKey], &c.models) != nil || c.models == nil {
@@ -131,8 +148,12 @@ func (c *catalog) render(cfg APIConfig) ([]byte, []string, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	c.payload[c.listKey] = b
-	b, err = json.Marshal(c.payload)
+	payload := make(map[string]json.RawMessage, len(c.payload))
+	for key, value := range c.payload {
+		payload[key] = value
+	}
+	payload[c.listKey] = b
+	b, err = json.Marshal(payload)
 	return b, warnings, err
 }
 

@@ -60,7 +60,6 @@ func (m *Manager) Configure(cfg Config) error {
 		cfg.ListenAddress = defaultListenAddress
 	}
 	if err := cfg.Validate(); err != nil {
-		m.Stop()
 		return err
 	}
 	cfg.APIs = slices.Clone(cfg.APIs)
@@ -78,6 +77,7 @@ func (m *Manager) Configure(cfg Config) error {
 	m.mu.Lock()
 	if !reflect.DeepEqual(cfg, m.cfg) {
 		m.generation++
+		modelCatalogCache.clear()
 		for conn := range m.connections {
 			_ = conn.Close()
 			delete(m.connections, conn)
@@ -123,7 +123,13 @@ func (m *Manager) Configure(cfg Config) error {
 		}
 		return nil
 	}
-	server := &http.Server{Addr: listener.Addr().String(), Handler: m, ReadHeaderTimeout: 10 * time.Second}
+	server := &http.Server{
+		Addr:              listener.Addr().String(),
+		Handler:           m,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       requestReadTimeout,
+		IdleTimeout:       90 * time.Second,
+	}
 	m.server = server
 	m.listener = listener
 	m.lastError = ""
@@ -198,6 +204,7 @@ func (m *Manager) Stop() {
 	server, listener := m.server, m.listener
 	m.server, m.listener = nil, nil
 	m.generation++
+	modelCatalogCache.clear()
 	for conn := range m.connections {
 		_ = conn.Close()
 		delete(m.connections, conn)
