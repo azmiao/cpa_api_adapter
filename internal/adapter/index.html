@@ -59,7 +59,7 @@
 <label id="tcp-settings" class="full" hidden>TCP 监听地址<input id="listen-address" autocomplete="off" placeholder="127.0.0.1:18318"></label>
 <fieldset id="unix-settings" class="grid full"><label class="full">本地套接字路径<input id="socket-path" required></label><label>套接字权限<select id="socket-mode"><option value="0660">0660</option><option value="0600">0600</option><option value="0666">0666</option></select></label></fieldset>
 <div class="full"><label>实际监听地址</label><code id="listen-status">未监听</code></div>
-<label>最大请求体（MB）<input id="max-body" type="number" min="1" max="512" step="1" required></label>
+<label>请求/消息上限（MB）<input id="max-body" type="number" min="1" max="512" step="1" required><small class="field-hint">限制请求体、改写响应、SSE 事件和 WebSocket 消息。</small></label>
 </div><div class="notice">API Key 保存在 CPA 配置文件中；管理密钥仅保存在当前页面内存中。</div></section>
 <div id="message" class="feedback" role="status" aria-live="polite"></div>
 <div class="actions"><span id="save-state">已保存</span><button id="save" class="primary" type="button">保存全部</button></div>
@@ -78,6 +78,7 @@ const management = root + '/v0/management/plugins/cpa-api-adapter/';
 const configURL = root + '/v8/management/config/plugins/configs/cpa-api-adapter';
 let managementKey = '', apis = [], active = -1, dirty = false, revision = 0, catalogLimit = 50;
 const catalogs = new WeakMap();
+let statusTimer=null,statusController=null,saving=false;
 const selectControllers = new WeakMap();
 let openSelect = null, selectSequence = 0;
 function closeSelect(restoreFocus=false){
@@ -117,14 +118,33 @@ document.querySelectorAll('select').forEach(enhanceSelect);
 function message(id,text,good=false){$(id).textContent=text;$(id).classList.toggle('good',good);}
 function changed(){dirty=true;revision++;$('save-state').textContent='未保存';}
 async function api(url,options={}){
-  const headers=new Headers(options.headers||{});headers.set('Authorization','Bearer '+managementKey);
-  if(options.body)headers.set('Content-Type','application/json');
-  const response=await fetch(url,{...options,headers,cache:'no-store',credentials:'same-origin'});
-  let data;try{data=await response.json();}catch{data={};}
-  if(!response.ok)throw new Error(data.error?.message||data.error||'请求失败（HTTP '+response.status+'）');
-  return data;
+  const {timeout=20000,signal,...request}=options,headers=new Headers(request.headers||{});headers.set('Authorization','Bearer '+managementKey);
+  if(request.body)headers.set('Content-Type','application/json');
+  const controller=new AbortController(),abort=()=>controller.abort();
+  if(signal?.aborted)abort();else signal?.addEventListener('abort',abort,{once:true});
+  let timedOut=false;const timer=timeout>0?setTimeout(()=>{timedOut=true;controller.abort();},timeout):null;
+  try{
+    const response=await fetch(url,{...request,headers,signal:controller.signal,cache:'no-store',credentials:'same-origin'});
+    let data;try{data=await response.json();}catch(error){if(error instanceof SyntaxError)throw new Error('响应不是有效 JSON（HTTP '+response.status+'）');throw error;}
+    if(!response.ok)throw new Error(data?.error?.message||data?.error||'请求失败（HTTP '+response.status+'）');
+    return data;
+  }catch(error){if(timedOut)throw new Error('请求超时');throw error;}finally{clearTimeout(timer);signal?.removeEventListener('abort',abort);}
 }
-function setStatus(status){$('status').textContent=status.running?'插件已就绪':'插件未就绪';$('status').className='pill '+(status.running?'good':'bad');$('listen-status').textContent=status.running?status.listen_mode+' '+status.listen_address:'未监听';}
+function setStatus(status){const known=status&&typeof status.running==='boolean',running=known&&status.running;$('status').textContent=known?(running?'插件已就绪':'插件未就绪'):'监听状态无法确认';$('status').className='pill '+(running?'good':'bad');$('listen-status').textContent=known?(running?status.listen_mode+' '+status.listen_address:'未监听'):'无法确认';}
+function stopStatusPolling(){clearInterval(statusTimer);statusTimer=null;statusController?.abort();}
+function startStatusPolling(immediate=false){
+  if(!managementKey||$('app').hidden||document.hidden||saving)return;
+  if(statusTimer===null)statusTimer=setInterval(refreshStatus,5000);
+  if(immediate)refreshStatus();
+}
+async function refreshStatus(){
+  if(statusController||saving||document.hidden||$('app').hidden||!managementKey)return;
+  const controller=new AbortController();statusController=controller;
+  try{const status=await api(management+'status',{timeout:15000,signal:controller.signal});if(!controller.signal.aborted&&statusTimer!==null&&!saving)setStatus(status);}
+  catch{if(!controller.signal.aborted&&statusTimer!==null&&!saving)setStatus(null);}
+  finally{if(statusController===controller)statusController=null;}
+}
+document.addEventListener('visibilitychange',()=>{if(document.hidden)stopStatusPolling();else startStatusPolling(true);});
 function selectTab(button){
   closeSelect();
   const nav=button.parentElement;
@@ -193,6 +213,10 @@ function listenerOrigin(value){
 function syncListenerSettings(){
   const tcp=$('listen-mode').value==='tcp';$('tcp-settings').hidden=!tcp;$('listen-address').disabled=!tcp;$('listen-address').required=tcp;$('unix-settings').hidden=tcp;$('unix-settings').disabled=tcp;$('unix-proxy').hidden=tcp;syncSelect($('socket-mode'));
 }
+function proxyID(value){
+  let hash=0xcbf29ce484222325n;for(const byte of new TextEncoder().encode(value))hash=BigInt.asUintN(64,(hash^BigInt(byte))*0x100000001b3n);
+  return hash.toString(16).padStart(16,'0');
+}
 function address(){
   if(active<0)return;const item=apis[active],base=item.prefix?item.prefix+'/'+item.format:'',tcp=$('listen-mode').value==='tcp',origin=tcp?listenerOrigin($('listen-address').value):location.origin,baseURL=origin?origin+base:'';
   $('base-url').textContent=base?(baseURL||'请填写有效的 TCP 监听地址'):'请填写路由前缀';$('copy-url').disabled=!base||!baseURL;$('copy-proxy').disabled=true;
@@ -200,17 +224,20 @@ function address(){
   if(tcp){$('proxy-snippet').textContent='';return;}
   const socket=$('socket-path').value.trim().replace(/\\/g,'/');
   if(!base||!/^\/(?:[\p{L}\p{N}_~.!$&'()+,;=:@-]+\/)*[\p{L}\p{N}_~.!$&'()+,;=:@-]+$/u.test(item.prefix)||/[\s;{}$#"'\\]/.test(base)){$('proxy-snippet').textContent='请填写可用于代理配置的路由前缀';return;}
-  let upstream;
-  if($('proxy-type').value==='caddy'&&!/[\r\n{}]/.test(socket))upstream='unix/'+socket;
+  const proxyType=$('proxy-type').value;let upstream;
+  if(proxyType==='caddy'&&!/[\r\n{}]/.test(socket))upstream='unix/'+socket;
   else if(!socket.startsWith('/')||/[\s:;{}$#"'\\]/.test(socket)){$('proxy-snippet').textContent='此套接字路径不适用于 Nginx 配置，请选择 Caddy';return;}
-  else upstream='unix:'+socket+':'+base+'/';
-  if($('proxy-type').value==='caddy'){
-    const matcher='adapter_'+(active+1);$('proxy-snippet').textContent='@'+matcher+' path '+base+'/*\nhandle @'+matcher+' {\n    reverse_proxy '+JSON.stringify(upstream)+'\n}';
-  }else $('proxy-snippet').textContent='map $http_upgrade $adapter_connection_upgrade {\n    default upgrade;\n    \'\' close;\n}\n\nlocation ^~ '+base+'/ {\n    client_max_body_size '+Number($('max-body').value)+'m;\n    proxy_pass http://'+upstream+';\n    proxy_http_version 1.1;\n    proxy_set_header Host $host;\n    proxy_set_header Upgrade $http_upgrade;\n    proxy_set_header Connection $adapter_connection_upgrade;\n    proxy_buffering off;\n    proxy_cache off;\n    proxy_request_buffering off;\n    proxy_read_timeout 3600s;\n    proxy_send_timeout 3600s;\n}';
+  if(proxyType==='caddy'){
+    const matcher='adapter_'+proxyID(socket+'\0'+base);$('proxy-snippet').textContent='@'+matcher+' path '+base+'/*\nhandle @'+matcher+' {\n    reverse_proxy '+JSON.stringify(upstream)+'\n}';
+  }else{
+    const maxBody=Number($('max-body').value);if(!$('max-body').checkValidity()||!Number.isInteger(maxBody)){$('proxy-snippet').textContent='请填写 1–512 MB 的整数请求/消息上限';return;}
+    const id=proxyID(socket),name='cpa_adapter_'+id,connection='adapter_upgrade_'+id;
+    $('proxy-snippet').textContent='# http {} 内：同一套接字的共享 map/upstream 仅添加一次。\nmap $http_upgrade $'+connection+' {\n    default upgrade;\n    \'\' \'\';\n}\n\nupstream '+name+' {\n    server unix:'+socket+';\n    keepalive 32;\n}\n\n# 现有 server {} 内；其他 API 仅添加对应 location，复用上方配置。\nlocation ^~ '+base+'/ {\n    client_max_body_size '+maxBody+'m;\n    proxy_pass http://'+name+';\n    proxy_http_version 1.1;\n    proxy_set_header Host $host;\n    proxy_set_header Upgrade $http_upgrade;\n    proxy_set_header Connection $'+connection+';\n    proxy_buffering off;\n    proxy_cache off;\n    proxy_request_buffering off;\n    proxy_read_timeout 3600s;\n    proxy_send_timeout 3600s;\n}';
+  }
   $('copy-proxy').disabled=false;
 }
 function populate(cfg){$('listen-mode').value=cfg.listen_mode||'unix';$('listen-address').value=cfg.listen_address||'127.0.0.1:18318';$('socket-path').value=cfg.socket_path;$('socket-mode').value=cfg.socket_mode;$('max-body').value=cfg.max_body_mb;apis=structuredClone(cfg.apis||[]);$('proxy-type').value=$('listen-mode').value==='unix'&&/^[A-Za-z]:[\\/]/.test(cfg.socket_path)?'caddy':'nginx';for(const id of ['listen-mode','socket-mode','proxy-type'])syncSelect($(id));syncListenerSettings();showAPI(apis.length?0:-1);dirty=false;$('save-state').textContent='已保存';}
-$('login-form').addEventListener('submit',async event=>{event.preventDefault();managementKey=$('management-key').value;message('login-message','');try{const status=await api(management+'status');$('management-key').value='';populate(status.config);setStatus(status);$('login-card').hidden=true;$('app').hidden=false;if(status.error)message('message',status.error);}catch(error){managementKey='';message('login-message',error.message);}});
+$('login-form').addEventListener('submit',async event=>{event.preventDefault();managementKey=$('management-key').value;message('login-message','');try{const status=await api(management+'status',{timeout:15000});$('management-key').value='';populate(status.config);setStatus(status);$('login-card').hidden=true;$('app').hidden=false;startStatusPolling();if(status.error)message('message',status.error);}catch(error){managementKey='';message('login-message',error.message);}});
 $('add-api').addEventListener('click',()=>{storeActive();apis.push({name:'',api_key:'',prefix:'',upstream:'http://127.0.0.1:8317',format:'v1',mappings:[]});showAPI(apis.length-1);selectTab($('tab-config'));changed();$('api-name').focus();});
 $('remove-api').addEventListener('click',()=>{if(!confirm('删除当前 API？保存后生效。'))return;apis.splice(active,1);showAPI(apis.length?Math.min(active,apis.length-1):-1);changed();});
 $('show-key').addEventListener('click',()=>{const shown=$('api-key').type==='password';$('api-key').type=shown?'text':'password';$('show-key').textContent=shown?'隐藏':'显示';$('show-key').setAttribute('aria-pressed',String(shown));});
@@ -234,15 +261,22 @@ async function copyElement(id){
 $('copy-url').addEventListener('click',()=>copyElement('base-url'));$('copy-proxy').addEventListener('click',()=>copyElement('proxy-snippet'));
 function normalize(cfg){return {listen_mode:cfg.listen_mode||'unix',listen_address:cfg.listen_address||'127.0.0.1:18318',socket_path:cfg.socket_path,socket_mode:cfg.socket_mode,max_body_mb:cfg.max_body_mb,apis:(cfg.apis||[]).map(item=>({name:item.name||'',api_key:item.api_key,upstream:item.upstream,prefix:item.prefix,format:item.format,mappings:(item.mappings||[]).map(model=>({id:model.id,target:model.target,display_name:model.display_name||'',context_window:model.context_window||0,max_context_window:model.max_context_window||0,max_tokens:model.max_tokens||0,input_modalities:model.input_modalities||[],reasoning_levels:model.reasoning_levels||[],default_reasoning:model.default_reasoning||''}))}))};}
 $('save').addEventListener('click',async()=>{
-  const button=$('save');button.disabled=true;message('message','正在保存…',true);
+  if(!$('max-body').reportValidity())return;
+  const button=$('save');button.disabled=true;saving=true;stopStatusPolling();message('message','正在保存…',true);
   try{
     const cfg=collect(),savedRevision=revision;await api(management+'validate',{method:'POST',body:JSON.stringify(cfg)});await api(configURL,{method:'PATCH',body:JSON.stringify(cfg)});
-    let last,confirmed=false;for(let i=0;i<12;i++){await new Promise(resolve=>setTimeout(resolve,500));try{last=await api(management+'status');setStatus(last);if(JSON.stringify(normalize(last.config))===JSON.stringify(normalize(cfg))){confirmed=true;break;}}catch{}}
+    const expected=JSON.stringify(normalize(cfg)),deadline=performance.now()+6000;let last,confirmed=false;
+    while(performance.now()<deadline){
+      await new Promise(resolve=>setTimeout(resolve,Math.min(500,deadline-performance.now())));
+      const remaining=deadline-performance.now();if(remaining<=0)break;
+      try{last=await api(management+'status',{timeout:remaining});setStatus(last);if(performance.now()<=deadline&&JSON.stringify(normalize(last.config))===expected){confirmed=true;break;}}
+      catch{setStatus(null);}
+    }
     if(!confirmed)throw new Error('配置已写入，尚未确认插件重新加载，请检查 CPA 日志');
     if(revision===savedRevision){dirty=false;$('save-state').textContent=last.running?'已保存':'已保存，未启动';}
     if(!last.running)throw new Error('配置已写入，但插件未启动：'+(last.error||'请检查监听地址或套接字路径'));
     message('message',dirty?'配置已保存；当前页面仍有未保存修改':'配置已保存',true);
-  }catch(error){message('message',error.message);}finally{button.disabled=false;}
+  }catch(error){message('message',error.message);}finally{button.disabled=false;saving=false;startStatusPolling();}
 });
 window.addEventListener('beforeunload',event=>{if(dirty){event.preventDefault();event.returnValue='';}});
 </script>
