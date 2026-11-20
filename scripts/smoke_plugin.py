@@ -85,7 +85,7 @@ def main():
             },
             "socket_path": str(pathlib.Path(directory) / "adapter.sock"),
             "socket_mode": "0600",
-            "apis": [{"name": "Smoke", "api_key": "smoke-key",
+            "apis": [{"name": "Smoke", "api_key": "smoke-key", "upstream_api_key": "smoke-private-key",
                       "upstream": "http://127.0.0.1:1", "prefix": "/smoke",
                       "format": "v1", "mappings": []}],
         }

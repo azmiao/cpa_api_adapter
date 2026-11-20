@@ -37,7 +37,7 @@ func listenerCatalog(t *testing.T, cfg Config) string {
 func TestInvalidReconfigureAndValidationKeepAuthenticatedListener(t *testing.T) {
 	catalogTestCache(t, time.Minute, time.Now)
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Authorization") != "Bearer client-secret" {
+		if r.Header.Get("Authorization") != "Bearer upstream-secret" {
 			http.Error(w, "wrong key", http.StatusUnauthorized)
 			return
 		}
@@ -70,12 +70,31 @@ func TestInvalidReconfigureAndValidationKeepAuthenticatedListener(t *testing.T) 
 		t.Fatal("invalid direct configuration was accepted")
 	}
 	assertPreserved()
+	missing := cfg
+	missing.APIs = append([]APIConfig(nil), cfg.APIs...)
+	missing.APIs[0].UpstreamAPIKey = ""
+	data, err := json.Marshal(missing)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request, err := json.Marshal(lifecycleRequest{ConfigYAML: data})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rpc.Handle("plugin.reconfigure", request); err == nil {
+		t.Fatal("missing private upstream key replaced a running listener")
+	}
+	assertPreserved()
+	if _, err := rpc.Handle("plugin.register", request); err == nil {
+		t.Fatal("legacy registration replaced a running authenticated configuration")
+	}
+	assertPreserved()
 	for _, data := range []string{
 		"max_body_mb: not-a-number\n",
 		"listen_mode: tcp\nlisten_address: invalid\n",
 		"unknown: true\n",
 		"enabled: definitely\n",
-		"apis: [{api_key: key, upstream: http://127.0.0.1, prefix: /work, format: v1, typo: 1}]\n",
+		"apis: [{api_key: key, upstream_api_key: private-key, upstream: http://127.0.0.1, prefix: /work, format: v1, typo: 1}]\n",
 	} {
 		request, err := json.Marshal(lifecycleRequest{ConfigYAML: []byte(data)})
 		if err != nil {
@@ -95,7 +114,7 @@ func TestInvalidReconfigureAndValidationKeepAuthenticatedListener(t *testing.T) 
 		`[]`,
 		`{"listen_mod":"tcp"}`,
 		`{"enabled":"wrong"}`,
-		`{"apis":[{"api_key":"key","upstream":"http://127.0.0.1","prefix":"/work","format":"v1","typo":1}]}`,
+		`{"apis":[{"api_key":"key","upstream_api_key":"private-key","upstream":"http://127.0.0.1","prefix":"/work","format":"v1","typo":1}]}`,
 	} {
 		response := rpc.handleManagement(managementRequest{Method: http.MethodPost, Path: "/v0/management/plugins/" + PluginID + "/validate", Body: []byte(body)})
 		if response.StatusCode != http.StatusBadRequest {

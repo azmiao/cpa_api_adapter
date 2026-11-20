@@ -45,7 +45,7 @@ func newWSRegressionFixture(t *testing.T, injectHopHeaders bool) *wsRegressionFi
 	closed := make(chan error, 1)
 	upgrader := websocket.Upgrader{Subprotocols: []string{"responses.regression"}}
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Authorization") != "Bearer client-secret" {
+		if r.Header.Get("Authorization") != "Bearer upstream-secret" || r.Header.Get("X-Api-Key") != "" || r.Header.Get("X-Goog-Api-Key") != "" {
 			http.Error(w, "wrong upstream authorization", http.StatusUnauthorized)
 			return
 		}
@@ -106,7 +106,7 @@ func newWSRegressionFixture(t *testing.T, injectHopHeaders bool) *wsRegressionFi
 	}))
 	t.Cleanup(front.Close)
 	dialer := websocket.Dialer{HandshakeTimeout: 5 * time.Second, Subprotocols: []string{"responses.regression"}}
-	client, response, err := dialer.Dial("ws"+strings.TrimPrefix(front.URL, "http")+cfg.APIs[0].BasePath()+"/responses", http.Header{"Authorization": []string{"Bearer client-secret"}})
+	client, response, err := dialer.Dial("ws"+strings.TrimPrefix(front.URL, "http")+cfg.APIs[0].BasePath()+"/responses", http.Header{"Authorization": []string{"Bearer client-secret"}, "X-Api-Key": []string{"client-secret"}, "X-Goog-Api-Key": []string{"client-secret"}})
 	if err != nil {
 		if response != nil {
 			_ = response.Body.Close()
@@ -354,7 +354,7 @@ func TestWebSocketRejectsDuplicateAndTrailingJSONBeforeForwarding(t *testing.T) 
 
 func TestWebSocketStripsHopHeadersAndPreservesControlAndClose(t *testing.T) {
 	f := newWSRegressionFixture(t, true)
-	if f.headers.Get("Authorization") != "Bearer client-secret" || f.headers.Get("Connection") != "Upgrade" {
+	if f.headers.Get("Authorization") != "Bearer upstream-secret" || f.headers.Get("Connection") != "Upgrade" || f.headers.Get("X-Api-Key") != "" || f.headers.Get("X-Goog-Api-Key") != "" {
 		t.Fatalf("incorrect upstream handshake headers: %v", f.headers)
 	}
 	for _, key := range []string{"X-Remove-Me", "Proxy-Connection", "Keep-Alive", "Proxy-Authenticate", "Proxy-Authorization", "Te", "Trailer", "Transfer-Encoding"} {

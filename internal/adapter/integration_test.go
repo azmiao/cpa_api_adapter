@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -28,14 +29,16 @@ func TestAdapterCatalogHTTPAndWebSocket(t *testing.T) {
 
 func testAdapterCatalogHTTPAndWebSocket(t *testing.T, network string) {
 	requests := make(chan string, 32)
+	var catalogCalls atomic.Int32
 	upgrader := websocket.Upgrader{}
 	cpa := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Authorization") != "Bearer client-secret" {
+		if r.Header.Get("Authorization") != "Bearer upstream-secret" || r.Header.Get("X-Api-Key") != "" || r.Header.Get("X-Goog-Api-Key") != "" {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
 		switch {
 		case r.URL.Path == "/v1/models":
+			catalogCalls.Add(1)
 			if r.URL.Query().Get("client_version") == "" {
 				t.Error("missing client_version")
 			}
@@ -145,6 +148,21 @@ func testAdapterCatalogHTTPAndWebSocket(t *testing.T, network string) {
 		}
 		return resp.StatusCode, string(data)
 	}
+	for _, origin := range []string{cpa.URL, front.URL} {
+		req, err := http.NewRequest(http.MethodGet, origin+"/v1/models", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Authorization", "Bearer client-secret")
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusUnauthorized || len(requests) != 0 {
+			t.Fatalf("plugin key bypassed the model policy through direct CPA: %d", resp.StatusCode)
+		}
+	}
 
 	for _, path := range []string{"/codex/models?client_version=9.9.9", "/models?client_version=9.9.9"} {
 		status, body := do("GET", path, "", "client-secret")
@@ -173,6 +191,12 @@ func testAdapterCatalogHTTPAndWebSocket(t *testing.T, network string) {
 	status, _ = do("POST", "/codex/responses", `{"model":"work","model":"account-b/gpt"}`, "client-secret")
 	if status != 400 {
 		t.Fatalf("duplicate model accepted: %d", status)
+	}
+	if status, _ := do("POST", "/codex/responses", `{"model":"account-b/gpt"}`, "client-secret"); status != http.StatusNotFound || len(requests) != 0 {
+		t.Fatalf("disabled model reached upstream inference: %d", status)
+	}
+	if status, _ := do("GET", "/codex/models", "", "upstream-secret"); status != http.StatusUnauthorized {
+		t.Fatalf("private upstream key was accepted as a plugin user key: %d", status)
 	}
 
 	header := http.Header{"Authorization": []string{"Bearer client-secret"}}
@@ -220,6 +244,8 @@ func testAdapterCatalogHTTPAndWebSocket(t *testing.T, network string) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	modelCatalogCache.clear()
+	catalogBefore := catalogCalls.Load()
 	catalogResponse := (&RPC{Manager: manager}).handleManagement(managementRequest{
 		Method: http.MethodPost,
 		Path:   "/v0/management/plugins/cpa-api-adapter/catalog",
@@ -237,8 +263,11 @@ func testAdapterCatalogHTTPAndWebSocket(t *testing.T, network string) {
 	if catalogResponse.StatusCode != http.StatusOK || len(catalogResult.Models) != 2 || len(catalogResult.Warnings) != 1 || !strings.Contains(catalogResult.Warnings[0], "account-b/gpt") {
 		t.Fatalf("management catalog with conflict: status=%d body=%s", catalogResponse.StatusCode, catalogResponse.Body)
 	}
-	if bytes.Contains(catalogResponse.Body, []byte("client-secret")) {
-		t.Fatal("management catalog leaked the client key")
+	if catalogCalls.Load() != catalogBefore+1 {
+		t.Fatal("management catalog did not authenticate an independent CPA request")
+	}
+	if bytes.Contains(catalogResponse.Body, []byte("client-secret")) || bytes.Contains(catalogResponse.Body, []byte("upstream-secret")) {
+		t.Fatal("management catalog leaked credentials")
 	}
 	cfg.APIs[0].Mappings = []Model{{ID: "missing", Target: "account-z/gpt"}}
 	if err := manager.Configure(cfg); err != nil {

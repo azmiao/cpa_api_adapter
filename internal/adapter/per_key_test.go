@@ -21,7 +21,7 @@ import (
 
 func testConfig() Config {
 	cfg := DefaultConfig()
-	cfg.APIs = []APIConfig{{Name: "Work", APIKey: "client-secret", Upstream: "http://127.0.0.1:8317", Prefix: "/work", Format: "backend-api", Mappings: []Model{}}}
+	cfg.APIs = []APIConfig{{Name: "Work", APIKey: "client-secret", UpstreamAPIKey: "upstream-secret", Upstream: "http://127.0.0.1:8317", Prefix: "/work", Format: "backend-api", Mappings: []Model{}}}
 	return cfg
 }
 
@@ -29,7 +29,7 @@ func TestPerKeyStorageRoutesAndModelPolicy(t *testing.T) {
 	var inferenceCalls atomic.Int32
 	upstream := func(key, target string) *httptest.Server {
 		return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.Header.Get("Authorization") != "Bearer "+key && r.Header.Get("Authorization") != "Bearer all-key" {
+			if r.Header.Get("Authorization") != "Bearer "+key || r.Header.Get("X-Api-Key") != "" || r.Header.Get("X-Goog-Api-Key") != "" {
 				t.Errorf("wrong upstream key for %s", target)
 				http.Error(w, "wrong key", 401)
 				return
@@ -113,18 +113,18 @@ func TestPerKeyStorageRoutesAndModelPolicy(t *testing.T) {
 			}
 		}))
 	}
-	a, b := upstream("a-key", "target-a"), upstream("b-key", "target-b")
+	a, b := upstream("a-upstream-key", "target-a"), upstream("b-upstream-key", "target-b")
 	defer a.Close()
 	defer b.Close()
 	cfg := DefaultConfig()
 	cfg.APIs = []APIConfig{
-		{Name: "A", APIKey: "a-key", Upstream: a.URL, Prefix: "/a", Format: "v1", Mappings: []Model{{ID: "shared", Target: "target-a"}}},
-		{Name: "B", APIKey: "b-key", Upstream: b.URL, Prefix: "/b", Format: "backend-api", Mappings: []Model{{ID: "shared", Target: "target-b"}}},
-		{Name: "All", APIKey: "all-key", Upstream: a.URL, Prefix: "/all", Format: "v1", Mappings: []Model{}},
-		{Name: "Shared route", APIKey: "b-key", Upstream: b.URL, Prefix: "/a", Format: "v1", Mappings: []Model{{ID: "shared-b", Target: "target-b"}}},
-		{Name: "Shared prefix", APIKey: "a-key", Upstream: a.URL, Prefix: "/a", Format: "backend-api", Mappings: []Model{{ID: "backend-shared", Target: "target-a"}}},
-		{Name: "Shared key", APIKey: "a-key", Upstream: a.URL, Prefix: "/other", Format: "v1", Mappings: []Model{{ID: "other-shared", Target: "target-a"}}},
-		{Name: "Nested route", APIKey: "b-key", Upstream: b.URL, Prefix: "/a/v1", Format: "v1", Mappings: []Model{{ID: "nested-shared", Target: "target-b"}}},
+		{Name: "A", APIKey: "a-key", UpstreamAPIKey: "a-upstream-key", Upstream: a.URL, Prefix: "/a", Format: "v1", Mappings: []Model{{ID: "shared", Target: "target-a"}}},
+		{Name: "B", APIKey: "b-key", UpstreamAPIKey: "b-upstream-key", Upstream: b.URL, Prefix: "/b", Format: "backend-api", Mappings: []Model{{ID: "shared", Target: "target-b"}}},
+		{Name: "All", APIKey: "all-key", UpstreamAPIKey: "a-upstream-key", Upstream: a.URL, Prefix: "/all", Format: "v1", Mappings: []Model{}},
+		{Name: "Shared route", APIKey: "b-key", UpstreamAPIKey: "b-upstream-key", Upstream: b.URL, Prefix: "/a", Format: "v1", Mappings: []Model{{ID: "shared-b", Target: "target-b"}}},
+		{Name: "Shared prefix", APIKey: "a-key", UpstreamAPIKey: "a-upstream-key", Upstream: a.URL, Prefix: "/a", Format: "backend-api", Mappings: []Model{{ID: "backend-shared", Target: "target-a"}}},
+		{Name: "Shared key", APIKey: "a-key", UpstreamAPIKey: "a-upstream-key", Upstream: a.URL, Prefix: "/other", Format: "v1", Mappings: []Model{{ID: "other-shared", Target: "target-a"}}},
+		{Name: "Nested route", APIKey: "b-key", UpstreamAPIKey: "b-upstream-key", Upstream: b.URL, Prefix: "/a/v1", Format: "v1", Mappings: []Model{{ID: "nested-shared", Target: "target-b"}}},
 	}
 	dir, err := os.MkdirTemp("", "api-keys-")
 	if err != nil {
@@ -305,7 +305,7 @@ func TestPerKeyConfigurationRejectsAmbiguousRoutes(t *testing.T) {
 
 func TestStoreConfigRegistrationAndReconfiguration(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/models" || r.Header.Get("Authorization") != "Bearer client-secret" {
+		if r.URL.Path != "/v1/models" || r.Header.Get("Authorization") != "Bearer upstream-secret" {
 			http.Error(w, "unexpected request", http.StatusUnauthorized)
 			return
 		}
@@ -370,7 +370,7 @@ func TestStoreConfigRegistrationAndReconfiguration(t *testing.T) {
 
 func TestLegacyPublicBaseURLRegistrationAndReconfiguration(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/models" || r.Header.Get("Authorization") != "Bearer client-secret" {
+		if r.URL.Path != "/v1/models" || r.Header.Get("Authorization") != "Bearer upstream-secret" {
 			http.Error(w, "unexpected request", http.StatusUnauthorized)
 			return
 		}
@@ -379,8 +379,8 @@ func TestLegacyPublicBaseURLRegistrationAndReconfiguration(t *testing.T) {
 	}))
 	defer upstream.Close()
 	apis := []map[string]any{
-		{"api_key": "client-secret", "upstream": upstream.URL, "prefix": "/first", "format": "backend-api", "public_base_url": "", "mappings": []Model{{ID: "first", Target: "available"}}},
-		{"api_key": "client-secret", "upstream": upstream.URL, "prefix": "/second", "format": "backend-api", "public_base_url": "https://old.example.com/second/backend-api", "mappings": []Model{{ID: "second", Target: "available"}}},
+		{"api_key": "client-secret", "upstream_api_key": "upstream-secret", "upstream": upstream.URL, "prefix": "/first", "format": "backend-api", "public_base_url": "", "mappings": []Model{{ID: "first", Target: "available"}}},
+		{"api_key": "client-secret", "upstream_api_key": "upstream-secret", "upstream": upstream.URL, "prefix": "/second", "format": "backend-api", "public_base_url": "https://old.example.com/second/backend-api", "mappings": []Model{{ID: "second", Target: "available"}}},
 	}
 	dir, err := os.MkdirTemp("", "api-legacy-")
 	if err != nil {
@@ -413,7 +413,7 @@ func TestLegacyPublicBaseURLRegistrationAndReconfiguration(t *testing.T) {
 			t.Fatalf("%s with obsolete API URLs: %v", method, err)
 		}
 		var registration struct {
-			OK bool `json:"ok"`
+			OK     bool `json:"ok"`
 			Result struct {
 				Metadata     struct{ Name string } `json:"metadata"`
 				Capabilities struct {
@@ -460,7 +460,7 @@ func TestLegacyPublicBaseURLKeepsStrictFieldValidation(t *testing.T) {
 		t.Run(location, func(t *testing.T) {
 			model := map[string]any{"id": "visible", "target": "available"}
 			api := map[string]any{
-				"api_key": "client-secret", "upstream": "http://127.0.0.1:8317", "prefix": "/work", "format": "v1",
+				"api_key": "client-secret", "upstream_api_key": "upstream-secret", "upstream": "http://127.0.0.1:8317", "prefix": "/work", "format": "v1",
 				"public_base_url": "https://old.example.com/work/v1", "mappings": []map[string]any{model},
 			}
 			input := map[string]any{"apis": []map[string]any{api}}

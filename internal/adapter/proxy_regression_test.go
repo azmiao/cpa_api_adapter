@@ -20,7 +20,7 @@ func regressionProxy(t *testing.T, upstream *httptest.Server, mappings []Model, 
 	t.Helper()
 	cfg := DefaultConfig()
 	cfg.ListenMode, cfg.ListenAddress, cfg.MaxBodyMB = "tcp", tcpTestAddress(t), maxBodyMB
-	cfg.APIs = []APIConfig{{Name: "regression", APIKey: "client-secret", Upstream: upstream.URL, Prefix: "/work", Format: "v1", Mappings: mappings}}
+	cfg.APIs = []APIConfig{{Name: "regression", APIKey: "client-secret", UpstreamAPIKey: "upstream-secret", Upstream: upstream.URL, Prefix: "/work", Format: "v1", Mappings: mappings}}
 	manager := NewManager()
 	if err := manager.Configure(cfg); err != nil || !manager.Status().Running {
 		t.Fatalf("configure proxy: %v %+v", err, manager.Status())
@@ -82,7 +82,7 @@ func TestProxyRejectsUnregisteredUpgradeWithoutContactingUpstream(t *testing.T) 
 
 func TestProxyRestoresSelectedAuthorizationAfterHopHeaderRemoval(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Authorization") != "Bearer client-secret" || r.Header.Get("X-Api-Key") != "" || r.Header.Get("X-Private") != "" {
+		if r.Header.Get("Authorization") != "Bearer upstream-secret" || r.Header.Get("X-Api-Key") != "" || r.Header.Get("X-Goog-Api-Key") != "" || r.Header.Get("X-Private") != "" {
 			http.Error(w, "incorrect forwarded identity", http.StatusUnauthorized)
 			return
 		}
@@ -92,7 +92,7 @@ func TestProxyRestoresSelectedAuthorizationAfterHopHeaderRemoval(t *testing.T) {
 	}))
 	defer upstream.Close()
 	base := regressionProxy(t, upstream, []Model{{ID: "target", Target: "target"}}, 1)
-	status, body := regressionRequest(t, "POST", base+"/chat/completions", strings.NewReader(`{"model":"target"}`), http.Header{"Connection": {"authorization, x-private, x-api-key"}, "X-Private": {"remove-me"}, "Content-Type": {"application/json"}})
+	status, body := regressionRequest(t, "POST", base+"/chat/completions", strings.NewReader(`{"model":"target"}`), http.Header{"Connection": {"authorization, x-private, x-api-key, x-goog-api-key"}, "X-Api-Key": {"client-secret"}, "X-Goog-Api-Key": {"client-secret"}, "X-Private": {"remove-me"}, "Content-Type": {"application/json"}})
 	if status != http.StatusOK || !bytes.Contains(body, []byte(`"model":"target"`)) {
 		t.Fatalf("valid key was lost during forwarding: %d %s", status, body)
 	}
@@ -117,7 +117,7 @@ func TestProxyChunkedOversizeReturns413(t *testing.T) {
 func TestResponsesResourceWhitelistCoversReadsAndActions(t *testing.T) {
 	var hiddenActions atomic.Int32
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Authorization") != "Bearer client-secret" {
+		if r.Header.Get("Authorization") != "Bearer upstream-secret" || r.Header.Get("X-Api-Key") != "" || r.Header.Get("X-Goog-Api-Key") != "" {
 			http.Error(w, "wrong identity", http.StatusUnauthorized)
 			return
 		}
@@ -166,7 +166,7 @@ func TestResponsesResourceWhitelistCoversReadsAndActions(t *testing.T) {
 		{"GET", "/responses/unknown", "无法确认", 502},
 		{"GET", "/responses/ambiguous", "不明确", 502},
 	} {
-		status, body := regressionRequest(t, request.method, base+request.suffix, nil, nil)
+		status, body := regressionRequest(t, request.method, base+request.suffix, nil, http.Header{"X-Api-Key": {"client-secret"}, "X-Goog-Api-Key": {"client-secret"}})
 		if status != request.status || !bytes.Contains(body, []byte(request.contains)) || bytes.Contains(body, []byte("private")) {
 			t.Fatalf("resource policy failed: %s %s => %d %s", request.method, request.suffix, status, body)
 		}
@@ -194,7 +194,7 @@ func TestRequestRewritePreservesPayloadAndRejectsAmbiguousFields(t *testing.T) {
 		_, _ = io.WriteString(w, `{"data":[{"id":"target"}]}`)
 	}))
 	defer upstream.Close()
-	cfg := APIConfig{APIKey: "client-secret", Upstream: upstream.URL, Format: "v1", Mappings: []Model{{ID: "visible", Target: "target"}}}
+	cfg := APIConfig{APIKey: "client-secret", UpstreamAPIKey: "upstream-secret", Upstream: upstream.URL, Format: "v1", Mappings: []Model{{ID: "visible", Target: "target"}}}
 	body := []byte("{ \"input\":{\"text\":\"a } , \\\" b\",\"number\":9007199254740993}, \"model\":\"visible\", \"extra\":[true,null,{\"x\":2}] }")
 	req := httptest.NewRequest(http.MethodPost, "/work/v1/responses", nil)
 	req.Header.Set("Authorization", "Bearer client-secret")

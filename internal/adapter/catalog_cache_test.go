@@ -49,7 +49,7 @@ func catalogTestCache(t *testing.T, ttl time.Duration, now func() time.Time) {
 }
 
 func catalogConfig(server *httptest.Server) APIConfig {
-	return APIConfig{APIKey: "client-secret", Upstream: server.URL, Prefix: "/work", Format: "backend-api"}
+	return APIConfig{APIKey: "client-secret", UpstreamAPIKey: "upstream-secret", Upstream: server.URL, Prefix: "/work", Format: "backend-api"}
 }
 
 func TestCatalogConcurrentConsumersShareFetch(t *testing.T) {
@@ -176,7 +176,12 @@ func TestCatalogSeparatesEffectiveQueryKeysAndForwardedHeaders(t *testing.T) {
 	catalogTestCache(t, time.Minute, time.Now)
 	var calls atomic.Int32
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		stamp := fmt.Sprint(calls.Add(1))
+		key := r.Header.Get("Authorization")
+		if key != "Bearer upstream-secret" && key != "Bearer other-upstream-secret" || r.Header.Get("X-Api-Key") != "" || r.Header.Get("X-Goog-Api-Key") != "" {
+			http.Error(w, "wrong upstream credentials", http.StatusUnauthorized)
+			return
+		}
+		stamp := fmt.Sprintf("%s-%d", strings.TrimPrefix(key, "Bearer "), calls.Add(1))
 		_ = json.NewEncoder(w).Encode(map[string]any{"models": []any{map[string]string{"slug": stamp}}, "data": []any{map[string]string{"id": stamp}}})
 	}))
 	defer upstream.Close()
@@ -198,20 +203,35 @@ func TestCatalogSeparatesEffectiveQueryKeysAndForwardedHeaders(t *testing.T) {
 	if fetch(cfg, headers, "beta=2&alpha=1&client_version=0.159.0") != baseline {
 		t.Fatal("equivalent normalized queries did not share a catalog")
 	}
-	for _, name := range []string{"Authorization", "X-Api-Key", "X-Goog-Api-Key", "Chatgpt-Account-Id", "User-Agent", "Originator", "Version"} {
+	for _, name := range []string{"Authorization", "X-Api-Key", "X-Goog-Api-Key"} {
+		t.Run(name, func(t *testing.T) {
+			changed := headers.Clone()
+			changed.Set(name, "different")
+			if fetch(cfg, changed, "alpha=1&beta=2") != baseline {
+				t.Fatal("inbound credentials changed the effective private upstream catalog")
+			}
+		})
+	}
+	for _, name := range []string{"Chatgpt-Account-Id", "User-Agent", "Originator", "Version"} {
 		t.Run(name, func(t *testing.T) {
 			changed := headers.Clone()
 			changed.Set(name, "different")
 			id := fetch(cfg, changed, "alpha=1&beta=2")
 			if id == baseline || fetch(cfg, changed, "beta=2&alpha=1") != id {
-				t.Fatal("different forwarded credentials/client identity leaked or failed to reuse its own catalog")
+				t.Fatal("different forwarded client identity leaked or failed to reuse its own catalog")
 			}
 		})
 	}
 	changed := cfg
 	changed.APIKey = "another-key"
-	if fetch(changed, headers, "alpha=1&beta=2") == baseline {
-		t.Fatal("different configured keys shared a catalog")
+	if fetch(changed, headers, "alpha=1&beta=2") != baseline {
+		t.Fatal("plugin user key changed the effective upstream catalog")
+	}
+	changed = cfg
+	changed.UpstreamAPIKey = "other-upstream-secret"
+	private := fetch(changed, headers, "alpha=1&beta=2")
+	if private == baseline || !strings.HasPrefix(private, "other-upstream-secret-") || fetch(changed, headers, "beta=2&alpha=1") != private {
+		t.Fatal("different private upstream credentials shared or failed to reuse their own catalog")
 	}
 	if fetch(cfg, headers, "alpha=1&beta=3") == baseline {
 		t.Fatal("distinct effective query returned another query's catalog")
