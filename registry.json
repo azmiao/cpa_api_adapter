@@ -6,7 +6,7 @@
       "name": "CPA API Adapter",
       "description": "按路由前缀、出口格式和 API Key 配置 OpenAI / Codex 接口与模型白名单。",
       "author": "azmiao",
-      "version": "0.4.1",
+      "version": "0.4.2",
       "repository": "https://github.com/azmiao/cpa_api_adapter",
       "homepage": "https://github.com/azmiao/cpa_api_adapter",
       "license": "MIT",
