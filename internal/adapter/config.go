@@ -3,6 +3,7 @@ package adapter
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/netip"
 	"net/url"
@@ -18,6 +19,8 @@ const PluginID = "cpa-api-adapter"
 
 const defaultListenAddress = "127.0.0.1:18318"
 
+var errMissingUpstreamAPIKey = errors.New("CPA 上游 API Key 必填；请填写新的私有 CPA Key，并从 CPA 删除已分发的旧 Key")
+
 type Config struct {
 	ListenMode    string      `json:"listen_mode" yaml:"listen_mode"`
 	ListenAddress string      `json:"listen_address" yaml:"listen_address"`
@@ -28,12 +31,13 @@ type Config struct {
 }
 
 type APIConfig struct {
-	Name     string  `json:"name" yaml:"name"`
-	APIKey   string  `json:"api_key" yaml:"api_key"`
-	Upstream string  `json:"upstream" yaml:"upstream"`
-	Prefix   string  `json:"prefix" yaml:"prefix"`
-	Format   string  `json:"format" yaml:"format"`
-	Mappings []Model `json:"mappings" yaml:"mappings"`
+	Name           string  `json:"name" yaml:"name"`
+	APIKey         string  `json:"api_key" yaml:"api_key"`
+	UpstreamAPIKey string  `json:"upstream_api_key" yaml:"upstream_api_key"`
+	Upstream       string  `json:"upstream" yaml:"upstream"`
+	Prefix         string  `json:"prefix" yaml:"prefix"`
+	Format         string  `json:"format" yaml:"format"`
+	Mappings       []Model `json:"mappings" yaml:"mappings"`
 }
 
 type Model struct {
@@ -142,6 +146,7 @@ func (c Config) Validate() error {
 		return fmt.Errorf("请求大小限制必须在 1 到 512 MB 之间")
 	}
 	identities := make(map[[3]string]bool, len(c.APIs))
+	upstreamKeys := make(map[string]struct{}, len(c.APIs))
 	for i, api := range c.APIs {
 		if err := api.Validate(); err != nil {
 			return fmt.Errorf("第 %d 个 API: %w", i+1, err)
@@ -151,6 +156,12 @@ func (c Config) Validate() error {
 			return fmt.Errorf("第 %d 个 API 的路由前缀、出口格式和 API Key 组合重复", i+1)
 		}
 		identities[identity] = true
+		upstreamKeys[api.UpstreamAPIKey] = struct{}{}
+	}
+	for i, api := range c.APIs {
+		if _, exists := upstreamKeys[api.APIKey]; exists {
+			return fmt.Errorf("第 %d 个 API 的插件 API Key 不能作为任何 API 的 CPA 上游 Key", i+1)
+		}
 	}
 	return nil
 }
@@ -166,7 +177,16 @@ func (c Config) listenEndpoint() (string, string) {
 
 func (c APIConfig) Validate() error {
 	if c.APIKey == "" || strings.ContainsAny(c.APIKey, " \r\n\t") {
-		return fmt.Errorf("API Key 必填且不能包含空白")
+		return fmt.Errorf("插件 API Key 必填且不能包含空白")
+	}
+	if c.UpstreamAPIKey == "" {
+		return errMissingUpstreamAPIKey
+	}
+	if strings.ContainsAny(c.UpstreamAPIKey, " \r\n\t") {
+		return fmt.Errorf("CPA 上游 API Key 不能包含空白")
+	}
+	if c.UpstreamAPIKey == c.APIKey {
+		return fmt.Errorf("CPA 上游 API Key 不能与插件 API Key 相同；请使用未分发给用户的私有 CPA Key")
 	}
 	u, err := url.Parse(c.Upstream)
 	if err != nil || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Scheme != "http" && u.Scheme != "https") {

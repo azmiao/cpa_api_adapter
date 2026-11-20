@@ -50,7 +50,7 @@ func (m *Manager) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeError(w, &apiError{http.StatusBadRequest, "请求路径必须是规范路径"})
 		return
 	}
-	r.Header.Set("Authorization", "Bearer "+api.APIKey)
+	r.Header.Set("Authorization", "Bearer "+api.UpstreamAPIKey)
 	r.Header.Del("X-Api-Key")
 	r.Header.Del("X-Goog-Api-Key")
 	suffix := r.URL.Path[len(api.Prefix)+len(api.Format)+1:]
@@ -159,7 +159,7 @@ func (m *Manager) proxyResponse(w http.ResponseWriter, r *http.Request, cfg Conf
 			pr.Out.URL.Path = u.Path
 			pr.Out.URL.RawPath = ""
 			pr.Out.URL.RawQuery = u.RawQuery
-			pr.Out.Header.Set("Authorization", "Bearer "+api.APIKey)
+			pr.Out.Header.Set("Authorization", "Bearer "+api.UpstreamAPIKey)
 			pr.Out.Header.Del("X-Api-Key")
 			pr.Out.Header.Del("X-Goog-Api-Key")
 			if directResourceRead {

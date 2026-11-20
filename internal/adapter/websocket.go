@@ -237,7 +237,7 @@ func (m *Manager) proxyWebSocket(w http.ResponseWriter, r *http.Request, cfg Con
 	for _, key := range []string{"Sec-Websocket-Key", "Sec-Websocket-Version", "Sec-Websocket-Extensions", "Sec-Websocket-Protocol"} {
 		headers.Del(key)
 	}
-	headers.Set("Authorization", "Bearer "+api.APIKey)
+	headers.Set("Authorization", "Bearer "+api.UpstreamAPIKey)
 	dialer := websocket.Dialer{HandshakeTimeout: 20 * time.Second, Subprotocols: websocket.Subprotocols(r), WriteBufferSize: 4096, WriteBufferPool: &wsWriteBufferPool}
 	upstream, response, err := dialer.DialContext(r.Context(), u.String(), headers)
 	if err != nil {

@@ -4,6 +4,7 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 )
@@ -50,9 +51,10 @@ func (p *RPC) Handle(method string, request []byte) ([]byte, error) {
 		}
 		cfg, err := ParseConfig(req.ConfigYAML)
 		if err != nil {
-			return nil, err
-		}
-		if err = p.Manager.Configure(cfg); err != nil {
+			if method != "plugin.register" || !errors.Is(err, errMissingUpstreamAPIKey) || !p.Manager.configureBlocked(cfg, err) {
+				return nil, err
+			}
+		} else if err = p.Manager.Configure(cfg); err != nil {
 			return nil, err
 		}
 		result = map[string]any{
@@ -129,7 +131,7 @@ func (p *RPC) handleManagement(req managementRequest) managementResponse {
 		if err := input.Validate(); err != nil {
 			return managementJSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
 		}
-		headers := http.Header{"Authorization": []string{"Bearer " + input.APIKey}}
+		headers := http.Header{"Authorization": []string{"Bearer " + input.UpstreamAPIKey}}
 		c, err := fetchCatalog(context.Background(), input, headers, "")
 		if err != nil {
 			if ae, ok := err.(*apiError); ok {

@@ -64,11 +64,12 @@ func fetchCatalog(ctx context.Context, cfg APIConfig, headers http.Header, query
 	if err != nil {
 		return nil, &apiError{http.StatusBadGateway, "无法构造 CPA 目录请求"}
 	}
-	for _, name := range []string{"Authorization", "X-Api-Key", "X-Goog-Api-Key", "User-Agent", "Originator", "Version", "Chatgpt-Account-Id"} {
+	for _, name := range []string{"User-Agent", "Originator", "Version", "Chatgpt-Account-Id"} {
 		for _, value := range headers.Values(name) {
 			req.Header.Add(name, value)
 		}
 	}
+	req.Header.Set("Authorization", "Bearer "+cfg.UpstreamAPIKey)
 	req.Header.Set("Accept", "application/json")
 	key := catalogRequestKey(req, cfg)
 	return modelCatalogCache.get(ctx, key, func(loadCtx context.Context) (*catalog, error) {

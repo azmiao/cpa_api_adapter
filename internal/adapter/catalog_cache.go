@@ -63,7 +63,7 @@ func catalogRequestKey(req *http.Request, cfg APIConfig) catalogKey {
 	}
 	add(req.URL.String())
 	add(cfg.Format)
-	add(cfg.APIKey)
+	add(cfg.UpstreamAPIKey)
 	names := make([]string, 0, len(req.Header))
 	for name := range req.Header {
 		names = append(names, name)

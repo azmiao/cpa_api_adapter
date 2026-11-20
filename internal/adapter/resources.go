@@ -52,7 +52,7 @@ func fetchResponseMapping(r *http.Request, api APIConfig, id string, limit int64
 	req.Header = r.Header.Clone()
 	removeHopHeaders(req.Header)
 	removeConditionalHeaders(req.Header)
-	req.Header.Set("Authorization", "Bearer "+api.APIKey)
+	req.Header.Set("Authorization", "Bearer "+api.UpstreamAPIKey)
 	req.Header.Del("X-Api-Key")
 	req.Header.Del("X-Goog-Api-Key")
 	req.Header.Del("Content-Length")

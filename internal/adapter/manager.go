@@ -52,6 +52,20 @@ func (m *Manager) Status() Status {
 	return status
 }
 
+// Keep legacy configurations editable through management without exposing a listener.
+func (m *Manager) configureBlocked(cfg Config, err error) bool {
+	m.lifeMu.Lock()
+	defer m.lifeMu.Unlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.server != nil {
+		return false
+	}
+	m.cfg = cfg
+	m.lastError = err.Error()
+	return true
+}
+
 func (m *Manager) Configure(cfg Config) error {
 	if cfg.ListenMode == "" {
 		cfg.ListenMode = "unix"
