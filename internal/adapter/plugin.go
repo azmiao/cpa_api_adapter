@@ -11,7 +11,7 @@ import (
 //go:embed index.html
 var page []byte
 
-var pluginVersion = "0.4.1"
+var pluginVersion = "0.4.2"
 
 type RPC struct{ Manager *Manager }
 
