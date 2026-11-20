@@ -51,6 +51,12 @@ func testAdapterCatalogHTTPAndWebSocket(t *testing.T, network string) {
 				Model string `json:"model"`
 			}
 			_ = json.Unmarshal(body, &payload)
+			if payload.Model != "account-a/gpt" && payload.Model != "account-b/gpt" {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusNotFound)
+				_, _ = io.WriteString(w, `{"error":{"code":"model_not_found","message":"CPA unknown model","type":"invalid_request_error"}}`)
+				return
+			}
 			if strings.HasSuffix(r.URL.Path, "/compact") {
 				w.Header().Set("Content-Type", "application/json")
 				_, _ = fmt.Fprintf(w, `{"model":%q,"value":9007199254740993}`, payload.Model)
@@ -273,8 +279,12 @@ func testAdapterCatalogHTTPAndWebSocket(t *testing.T, network string) {
 	if err := manager.Configure(cfg); err != nil {
 		t.Fatal(err)
 	}
-	if status, _ := do("POST", "/codex/responses", `{"model":"missing"}`, "client-secret"); status != 404 {
-		t.Fatalf("missing target routed: %d", status)
+	status, body = do("POST", "/codex/responses", `{"model":"missing"}`, "client-secret")
+	if status != http.StatusNotFound || body != `{"error":{"code":"model_not_found","message":"CPA unknown model","type":"invalid_request_error"}}` {
+		t.Fatalf("missing target did not preserve CPA's 404: %d %s", status, body)
+	}
+	if request = <-requests; request != `/backend-api/codex/responses {"model":"account-z/gpt"}` {
+		t.Fatalf("missing target was not forwarded to CPA: %s", request)
 	}
 }
 

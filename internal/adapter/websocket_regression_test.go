@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -32,10 +33,17 @@ type wsRegressionFixture struct {
 	headers        http.Header
 	received       <-chan wsRegressionFrame
 	upstreamClosed <-chan error
+	catalogMissing atomic.Bool
+	catalogCalls   atomic.Int32
 }
 
-func newWSRegressionFixture(t *testing.T, injectHopHeaders bool) *wsRegressionFixture {
+func newWSRegressionFixture(t *testing.T, injectHopHeaders bool, format string) *wsRegressionFixture {
 	t.Helper()
+	f := &wsRegressionFixture{}
+	responsePath := "/v1/responses"
+	if format == "backend-api" {
+		responsePath = "/backend-api/codex/responses"
+	}
 	type connection struct {
 		conn    *websocket.Conn
 		headers http.Header
@@ -50,11 +58,20 @@ func newWSRegressionFixture(t *testing.T, injectHopHeaders bool) *wsRegressionFi
 			return
 		}
 		if r.URL.Path == "/v1/models" {
+			f.catalogCalls.Add(1)
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"object":"list","data":[{"id":"target-a","object":"model"},{"id":"target-b","object":"model"}]}`))
+			idKey, listKey := "id", "data"
+			if format == "backend-api" {
+				idKey, listKey = "slug", "models"
+			}
+			models := []map[string]string{{idKey: "target-b", "object": "model"}}
+			if !f.catalogMissing.Load() {
+				models = append(models, map[string]string{idKey: "target-a", "object": "model"})
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{listKey: models})
 			return
 		}
-		if r.URL.Path != "/v1/responses" || !websocket.IsWebSocketUpgrade(r) {
+		if r.URL.Path != responsePath || !websocket.IsWebSocketUpgrade(r) {
 			http.NotFound(w, r)
 			return
 		}
@@ -80,7 +97,7 @@ func newWSRegressionFixture(t *testing.T, injectHopHeaders bool) *wsRegressionFi
 	cfg.ListenAddress = tcpTestAddress(t)
 	cfg.MaxBodyMB = 1
 	cfg.APIs[0].Upstream = upstream.URL
-	cfg.APIs[0].Format = "v1"
+	cfg.APIs[0].Format = format
 	cfg.APIs[0].Mappings = []Model{{ID: "alias-a", Target: "target-a"}, {ID: "alias-b", Target: "target-b"}}
 	manager := NewManager()
 	t.Cleanup(manager.Stop)
@@ -106,7 +123,11 @@ func newWSRegressionFixture(t *testing.T, injectHopHeaders bool) *wsRegressionFi
 	}))
 	t.Cleanup(front.Close)
 	dialer := websocket.Dialer{HandshakeTimeout: 5 * time.Second, Subprotocols: []string{"responses.regression"}}
-	client, response, err := dialer.Dial("ws"+strings.TrimPrefix(front.URL, "http")+cfg.APIs[0].BasePath()+"/responses", http.Header{"Authorization": []string{"Bearer client-secret"}, "X-Api-Key": []string{"client-secret"}, "X-Goog-Api-Key": []string{"client-secret"}})
+	suffix := "/responses"
+	if format == "backend-api" {
+		suffix = "/codex/responses"
+	}
+	client, response, err := dialer.Dial("ws"+strings.TrimPrefix(front.URL, "http")+cfg.APIs[0].BasePath()+suffix, http.Header{"Authorization": []string{"Bearer client-secret"}, "X-Api-Key": []string{"client-secret"}, "X-Goog-Api-Key": []string{"client-secret"}})
 	if err != nil {
 		if response != nil {
 			_ = response.Body.Close()
@@ -121,7 +142,9 @@ func newWSRegressionFixture(t *testing.T, injectHopHeaders bool) *wsRegressionFi
 		t.Fatal("upstream WebSocket did not connect")
 	}
 	t.Cleanup(func() { _ = peer.conn.Close() })
-	return &wsRegressionFixture{client, peer.conn, peer.headers, received, closed}
+	f.client, f.upstream, f.headers = client, peer.conn, peer.headers
+	f.received, f.upstreamClosed = received, closed
+	return f
 }
 
 func wsRegressionWrite(t *testing.T, conn *websocket.Conn, kind int, body string) {
@@ -200,7 +223,7 @@ func (f *wsRegressionFixture) expectUpstreamBytes(t *testing.T, kind int, body s
 }
 
 func TestWebSocketRejectsConcurrentCreateWithoutChangingAlias(t *testing.T) {
-	f := newWSRegressionFixture(t, false)
+	f := newWSRegressionFixture(t, false, "v1")
 	wsRegressionWrite(t, f.client, websocket.TextMessage, `{"type":"response.create","model":"alias-a"}`)
 	f.expectUpstream(t, websocket.TextMessage, "response.create", "target-a")
 	wsRegressionWrite(t, f.client, websocket.BinaryMessage, `{"type":"response.create","model":"alias-b"}`)
@@ -223,7 +246,7 @@ func TestWebSocketRejectsConcurrentCreateWithoutChangingAlias(t *testing.T) {
 }
 
 func TestWebSocketRejectedCreateReleasesTurnAndRollsBackModel(t *testing.T) {
-	f := newWSRegressionFixture(t, false)
+	f := newWSRegressionFixture(t, false, "v1")
 	wsRegressionWrite(t, f.client, websocket.TextMessage, `{"type":"response.create","model":"alias-a"}`)
 	f.expectUpstream(t, websocket.TextMessage, "response.create", "target-a")
 	wsRegressionWrite(t, f.client, websocket.BinaryMessage, `{"type":"response.append"}`)
@@ -251,7 +274,7 @@ func TestWebSocketRejectedCreateReleasesTurnAndRollsBackModel(t *testing.T) {
 }
 
 func TestWebSocketAppendDoesNotQueueOrChangeActiveModel(t *testing.T) {
-	f := newWSRegressionFixture(t, false)
+	f := newWSRegressionFixture(t, false, "v1")
 	wsRegressionWrite(t, f.client, websocket.TextMessage, `{"type":"response.create","model":"alias-a"}`)
 	f.expectUpstream(t, websocket.TextMessage, "response.create", "target-a")
 	wsRegressionWrite(t, f.upstream, websocket.TextMessage, `{"type":"response.created","response":{"id":"response-a","model":"target-a"}}`)
@@ -278,7 +301,7 @@ func TestWebSocketAppendDoesNotQueueOrChangeActiveModel(t *testing.T) {
 }
 
 func TestWebSocketLateResponseIDsDoNotEndNewTurn(t *testing.T) {
-	f := newWSRegressionFixture(t, false)
+	f := newWSRegressionFixture(t, false, "v1")
 	wsRegressionWrite(t, f.client, websocket.TextMessage, `{"type":"response.create","model":"alias-a"}`)
 	f.expectUpstream(t, websocket.TextMessage, "response.create", "target-a")
 	wsRegressionWrite(t, f.upstream, websocket.TextMessage, `{"type":"response.completed","response":{"id":"response-a","model":"target-a"}}`)
@@ -310,7 +333,7 @@ func TestWebSocketLateResponseIDsDoNotEndNewTurn(t *testing.T) {
 }
 
 func TestWebSocketRejectsDuplicateAndTrailingJSONBeforeForwarding(t *testing.T) {
-	f := newWSRegressionFixture(t, false)
+	f := newWSRegressionFixture(t, false, "v1")
 	wsRegressionWrite(t, f.client, websocket.TextMessage, `{"type":"response.create","model":"alias-a"}`)
 	f.expectUpstream(t, websocket.TextMessage, "response.create", "target-a")
 	wsRegressionWrite(t, f.upstream, websocket.TextMessage, `{"type":"response.completed","response":{"id":"response-a","model":"target-a"}}`)
@@ -353,7 +376,7 @@ func TestWebSocketRejectsDuplicateAndTrailingJSONBeforeForwarding(t *testing.T) 
 }
 
 func TestWebSocketStripsHopHeadersAndPreservesControlAndClose(t *testing.T) {
-	f := newWSRegressionFixture(t, true)
+	f := newWSRegressionFixture(t, true, "v1")
 	if f.headers.Get("Authorization") != "Bearer upstream-secret" || f.headers.Get("Connection") != "Upgrade" || f.headers.Get("X-Api-Key") != "" || f.headers.Get("X-Goog-Api-Key") != "" {
 		t.Fatalf("incorrect upstream handshake headers: %v", f.headers)
 	}
@@ -413,7 +436,7 @@ func TestWebSocketStripsHopHeadersAndPreservesControlAndClose(t *testing.T) {
 }
 
 func TestWebSocketImplicitCreateRemainsSingleTurn(t *testing.T) {
-	f := newWSRegressionFixture(t, false)
+	f := newWSRegressionFixture(t, false, "v1")
 	wsRegressionWrite(t, f.client, websocket.TextMessage, `{"model":"alias-a","input":[]}`)
 	f.expectUpstream(t, websocket.TextMessage, "", "target-a")
 	wsRegressionWrite(t, f.client, websocket.BinaryMessage, `{"model":"alias-b","input":[]}`)
@@ -427,7 +450,7 @@ func TestWebSocketImplicitCreateRemainsSingleTurn(t *testing.T) {
 }
 
 func TestWebSocketPendingCreateDoesNotForwardOtherEvents(t *testing.T) {
-	f := newWSRegressionFixture(t, false)
+	f := newWSRegressionFixture(t, false, "v1")
 	wsRegressionWrite(t, f.client, websocket.TextMessage, `{"type":"response.create","model":"alias-a"}`)
 	f.expectUpstream(t, websocket.TextMessage, "response.create", "target-a")
 	for _, body := range []string{`{"type":"response.append"}`, `{"type":"client.notification"}`, `{"type":"client.notification","model":"alias-b"}`} {

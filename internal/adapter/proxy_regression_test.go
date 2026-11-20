@@ -16,17 +16,17 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-func regressionProxy(t *testing.T, upstream *httptest.Server, mappings []Model, maxBodyMB int) string {
+func regressionProxy(t *testing.T, upstream *httptest.Server, format string, mappings []Model, maxBodyMB int) string {
 	t.Helper()
 	cfg := DefaultConfig()
 	cfg.ListenMode, cfg.ListenAddress, cfg.MaxBodyMB = "tcp", tcpTestAddress(t), maxBodyMB
-	cfg.APIs = []APIConfig{{Name: "regression", APIKey: "client-secret", UpstreamAPIKey: "upstream-secret", Upstream: upstream.URL, Prefix: "/work", Format: "v1", Mappings: mappings}}
+	cfg.APIs = []APIConfig{{Name: "regression", APIKey: "client-secret", UpstreamAPIKey: "upstream-secret", Upstream: upstream.URL, Prefix: "/work", Format: format, Mappings: mappings}}
 	manager := NewManager()
 	if err := manager.Configure(cfg); err != nil || !manager.Status().Running {
 		t.Fatalf("configure proxy: %v %+v", err, manager.Status())
 	}
 	t.Cleanup(manager.Stop)
-	return "http://" + cfg.ListenAddress + "/work/v1"
+	return "http://" + cfg.ListenAddress + cfg.APIs[0].BasePath()
 }
 
 func regressionRequest(t *testing.T, method, target string, body io.Reader, headers http.Header) (int, []byte) {
@@ -62,7 +62,7 @@ func TestProxyRejectsUnregisteredUpgradeWithoutContactingUpstream(t *testing.T) 
 		}
 	}))
 	defer upstream.Close()
-	base := regressionProxy(t, upstream, []Model{{ID: "target", Target: "target"}}, 1)
+	base := regressionProxy(t, upstream, "v1", []Model{{ID: "target", Target: "target"}}, 1)
 	for _, suffix := range []string{"/realtime", "/models", "/chat/completions"} {
 		conn, response, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(base, "http")+suffix, http.Header{"Authorization": {"Bearer client-secret"}})
 		if conn != nil {
@@ -91,7 +91,7 @@ func TestProxyRestoresSelectedAuthorizationAfterHopHeaderRemoval(t *testing.T) {
 		_, _ = io.WriteString(w, `{"model":"target"}`)
 	}))
 	defer upstream.Close()
-	base := regressionProxy(t, upstream, []Model{{ID: "target", Target: "target"}}, 1)
+	base := regressionProxy(t, upstream, "v1", []Model{{ID: "target", Target: "target"}}, 1)
 	status, body := regressionRequest(t, "POST", base+"/chat/completions", strings.NewReader(`{"model":"target"}`), http.Header{"Connection": {"authorization, x-private, x-api-key, x-goog-api-key"}, "X-Api-Key": {"client-secret"}, "X-Goog-Api-Key": {"client-secret"}, "X-Private": {"remove-me"}, "Content-Type": {"application/json"}})
 	if status != http.StatusOK || !bytes.Contains(body, []byte(`"model":"target"`)) {
 		t.Fatalf("valid key was lost during forwarding: %d %s", status, body)
@@ -107,7 +107,7 @@ func TestProxyChunkedOversizeReturns413(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer upstream.Close()
-	base := regressionProxy(t, upstream, nil, 1)
+	base := regressionProxy(t, upstream, "v1", nil, 1)
 	status, body := regressionRequest(t, "POST", base+"/chat/completions", io.NopCloser(strings.NewReader(strings.Repeat("x", (1<<20)+1))), nil)
 	if status != http.StatusRequestEntityTooLarge || !bytes.Contains(body, []byte("请求体超过")) || bytes.Contains(body, []byte("无法连接")) {
 		t.Fatalf("chunked limit misreported as upstream failure: %d %s", status, body)
@@ -150,7 +150,7 @@ func TestResponsesResourceWhitelistCoversReadsAndActions(t *testing.T) {
 		}
 	}))
 	defer upstream.Close()
-	base := regressionProxy(t, upstream, []Model{{ID: "visible", Target: "target"}}, 1)
+	base := regressionProxy(t, upstream, "v1", []Model{{ID: "visible", Target: "target"}}, 1)
 	for _, request := range []struct {
 		method, suffix, contains string
 		status                   int
@@ -181,7 +181,7 @@ func TestResponsesResourceWhitelistCoversReadsAndActions(t *testing.T) {
 	if hiddenActions.Load() != 0 {
 		t.Fatal("disallowed resource subroute/action reached upstream")
 	}
-	all := regressionProxy(t, upstream, nil, 1)
+	all := regressionProxy(t, upstream, "v1", nil, 1)
 	status, body = regressionRequest(t, "GET", all+"/responses/hidden", nil, nil)
 	if status != 200 || !bytes.Contains(body, []byte(`"model":"not-allowed"`)) {
 		t.Fatalf("unrestricted resource access was narrowed: %d %s", status, body)
@@ -239,7 +239,7 @@ func TestLargeMultipartReplayKeepsBinaryAndRejectsDuplicateModel(t *testing.T) {
 		_, _ = io.WriteString(w, `{"model":"target=audio"}`)
 	}))
 	defer upstream.Close()
-	base := regressionProxy(t, upstream, []Model{{ID: "visible", Target: "target=audio"}}, 4)
+	base := regressionProxy(t, upstream, "v1", []Model{{ID: "visible", Target: "target=audio"}}, 4)
 	for _, duplicate := range []bool{false, true} {
 		var body bytes.Buffer
 		writer := multipart.NewWriter(&body)
