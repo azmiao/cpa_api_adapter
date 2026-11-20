@@ -27,6 +27,10 @@ type catalog struct {
 	idKey   string
 }
 
+const missingModelWarning = "目标模型 %q 暂未出现在 CPA 目录中；保留已配置模型，实际可用性由 CPA 推理接口判断"
+
+var modelObjectJSON = json.RawMessage(`"model"`)
+
 var localTransport = &http.Transport{
 	Proxy:                 nil,
 	DialContext:           (&net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
@@ -110,9 +114,10 @@ func loadCatalog(req *http.Request, format string) (*catalog, error) {
 	return c, nil
 }
 
+// CPA can omit cooling models; only ambiguity, not absence, invalidates a configured route.
 func (c *catalog) validateMapping(m Model) error {
-	if len(c.byID[m.Target]) != 1 {
-		return &apiError{http.StatusNotFound, fmt.Sprintf("目标模型 %q 不存在或不唯一，已拒绝路由", m.Target)}
+	if len(c.byID[m.Target]) > 1 {
+		return &apiError{http.StatusNotFound, fmt.Sprintf("目标模型 %q 在 CPA 目录中重复，已拒绝路由", m.Target)}
 	}
 	if m.ID != m.Target && len(c.byID[m.ID]) != 0 {
 		return &apiError{http.StatusConflict, fmt.Sprintf("别名 %q 与 CPA 模型冲突，已拒绝路由", m.ID)}
@@ -133,14 +138,29 @@ func (c *catalog) render(cfg APIConfig) ([]byte, []string, error) {
 				warnings = append(warnings, err.Error())
 				continue
 			}
-			entry := make(map[string]json.RawMessage, len(c.byID[mapping.Target][0]))
-			for k, v := range c.byID[mapping.Target][0] {
-				entry[k] = v
+			matches := c.byID[mapping.Target]
+			// Reserve space for the configured capability fields when CPA supplies no metadata.
+			capacity := 9
+			if len(matches) == 1 {
+				capacity = len(matches[0])
+			}
+			entry := make(map[string]json.RawMessage, capacity)
+			if len(matches) == 1 {
+				for k, v := range matches[0] {
+					entry[k] = v
+				}
+			} else {
+				warnings = append(warnings, fmt.Sprintf(missingModelWarning, mapping.Target))
+				if c.idKey == "id" {
+					entry["object"] = modelObjectJSON
+				}
 			}
 			mapping.Apply(entry)
 			if c.idKey == "id" {
+				entry["id"] = entry["slug"]
 				delete(entry, "slug")
-				entry["id"], _ = json.Marshal(mapping.ID)
+			} else if len(matches) == 0 && mapping.DisplayName == "" {
+				entry["display_name"] = entry["slug"]
 			}
 			models = append(models, entry)
 		}

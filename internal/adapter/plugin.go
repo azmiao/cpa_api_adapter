@@ -5,6 +5,7 @@ import (
 	_ "embed"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 )
@@ -143,6 +144,8 @@ func (p *RPC) handleManagement(req managementRequest) managementResponse {
 		for _, mapping := range input.Mappings {
 			if err := c.validateMapping(mapping); err != nil {
 				warnings = append(warnings, err.Error())
+			} else if len(c.byID[mapping.Target]) == 0 {
+				warnings = append(warnings, fmt.Sprintf(missingModelWarning, mapping.Target))
 			}
 		}
 		entries := make([]map[string]string, 0, len(c.models))
