@@ -89,6 +89,24 @@ const index = location.pathname.indexOf(marker);
 const root = index < 0 ? '' : location.pathname.slice(0,index);
 const management = root + '/v0/management/plugins/cpa-api-adapter/';
 const configURL = root + '/v8/management/config/plugins/configs/cpa-api-adapter';
+function panelManagementKey(){
+  try{
+    const raw=localStorage.getItem('cli-proxy-auth');if(!raw)return '';
+    const prefix=/^enc::v([12])::/.exec(raw);let saved;
+    if(prefix){
+      const bytes=Uint8Array.from(atob(raw.slice(prefix[0].length)),char=>char.charCodeAt(0));
+      const scopes=prefix[1]==='1'?[location.host+'|'+navigator.userAgent]:[location.host,'v2|'+location.host];
+      for(const scope of scopes){
+        const secret=new TextEncoder().encode('cli-proxy-api-webui::secure-storage|'+scope);
+        try{saved=JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(bytes.map((byte,i)=>byte^secret[i%secret.length])));break;}catch{}
+      }
+    }else saved=JSON.parse(raw);
+    const state=saved?.state,key=state?.managementKey;
+    if(typeof key!=='string'||!key.trim())return '';
+    if(state.apiBase&&new URL(state.apiBase,location.href).href.replace(/\/+$/,'')!==location.origin+root)return '';
+    return key.trim();
+  }catch{return '';}
+}
 let managementKey = '', apis = [], active = -1, dirty = false, revision = 0, catalogLimit = 50;
 const catalogs = new WeakMap();
 let statusTimer=null,statusController=null,saving=false;
@@ -260,7 +278,16 @@ function address(){
   $('copy-proxy').disabled=false;
 }
 function populate(cfg){$('listen-mode').value=cfg.listen_mode||'unix';$('listen-address').value=cfg.listen_address||'127.0.0.1:18318';$('socket-path').value=cfg.socket_path;$('socket-mode').value=cfg.socket_mode;$('max-body').value=cfg.max_body_mb;$('websocket-enabled').value=String(cfg.websocket_enabled===true);apis=structuredClone(cfg.apis||[]);$('proxy-type').value=$('listen-mode').value==='unix'&&/^[A-Za-z]:[\\/]/.test(cfg.socket_path)?'caddy':'nginx';for(const id of ['listen-mode','socket-mode','proxy-type','websocket-enabled'])syncSelect($(id));syncListenerSettings();showAPI(apis.length?0:-1);dirty=false;$('save-state').textContent='已保存';const missing=apis.filter(item=>!item.upstream_api_key).length;message('message',missing?'有 '+missing+' 条 API 缺少 CPA 上游 API Key：请保留插件 API Key，补填独立上游 Key，并从 CPA 移除已分发的旧 Key。':'');}
-$('login-form').addEventListener('submit',async event=>{event.preventDefault();managementKey=$('management-key').value;message('login-message','');try{const status=await api(management+'status',{timeout:15000});$('management-key').value='';populate(status.config);setStatus(status);$('login-card').hidden=true;$('app').hidden=false;startStatusPolling();if(status.error)message('message',[$('message').textContent,status.error].filter(Boolean).join('\n'));}catch(error){managementKey='';message('login-message',error.message);}});
+async function connect(key,automatic=false){
+  const input=$('management-key'),button=$('login-form').querySelector('button');if(button.disabled)return;
+  button.disabled=true;input.disabled=true;managementKey=key.trim();$('status').textContent=automatic?'正在自动连接':'正在连接';message('login-message',automatic?'正在使用 CPA 登录信息连接…':'');
+  try{
+    const status=await api(management+'status',{timeout:15000});input.value='';populate(status.config);setStatus(status);$('login-card').hidden=true;$('app').hidden=false;startStatusPolling();message('login-message','');
+    if(status.error)message('message',[$('message').textContent,status.error].filter(Boolean).join('\n'));
+  }catch(error){managementKey='';$('status').textContent='尚未连接';$('status').className='pill';message('login-message',(automatic?'自动连接失败，请手动连接：':'')+error.message);}
+  finally{button.disabled=false;input.disabled=false;}
+}
+$('login-form').addEventListener('submit',event=>{event.preventDefault();connect($('management-key').value);});
 $('add-api').addEventListener('click',()=>{storeActive();apis.push({name:'',api_key:'',upstream_api_key:'',prefix:'',upstream:'http://127.0.0.1:8317',format:'v1',mappings:[]});showAPI(apis.length-1);selectTab($('tab-config'));changed();$('api-name').focus();});
 $('remove-api').addEventListener('click',()=>{if(!confirm('删除当前 API？保存后生效。'))return;apis.splice(active,1);showAPI(apis.length?Math.min(active,apis.length-1):-1);changed();});
 for(const [button,input] of [['show-key','api-key'],['show-upstream-key','api-upstream-key']])$(button).addEventListener('click',()=>{const shown=$(input).type==='password';$(input).type=shown?'text':'password';$(button).textContent=shown?'隐藏':'显示';$(button).setAttribute('aria-pressed',String(shown));});
@@ -373,5 +400,6 @@ for(const id of ['log-api','log-model','log-result'])$(id).addEventListener('cha
 $('log-prev').addEventListener('click',()=>{if(logPage>0){logPage--;refreshLogs();}});
 $('log-next').addEventListener('click',()=>{if(logNext){logCursors=logCursors.slice(0,logPage+1);logCursors.push(logNext);logPage++;refreshLogs();}});
 window.addEventListener('beforeunload',event=>{if(dirty){event.preventDefault();event.returnValue='';}});
+{const key=panelManagementKey();if(key)connect(key,true);}
 </script>
 </body></html>
