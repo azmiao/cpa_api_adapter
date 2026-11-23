@@ -247,17 +247,16 @@ func writeWSMessage(conn *websocket.Conn, kind int, data []byte) error {
 }
 
 func (m *Manager) proxyWebSocket(w http.ResponseWriter, r *http.Request, cfg Config, api APIConfig, generation uint64, info callEntry) {
+	if !cfg.WebSocketEnabled {
+		writeError(w, &apiError{http.StatusForbidden, "WebSocket 已禁用，请在通用设置中启用或使用 HTTP/SSE"})
+		return
+	}
 	started := time.Now()
 	info.Transport = "websocket"
 	logFailure := func(status int) {
 		trace := m.calls.start(info, started)
 		trace.setStatus(status, w.Header().Get("Retry-After"), "websocket")
 		trace.finish("failed", logErrorClass(status))
-	}
-	if !cfg.WebSocketEnabled {
-		logFailure(http.StatusForbidden)
-		writeError(w, &apiError{http.StatusForbidden, "WebSocket 已禁用，请在通用设置中启用或使用 HTTP/SSE"})
-		return
 	}
 	if !websocket.IsWebSocketUpgrade(r) {
 		logFailure(http.StatusBadRequest)
