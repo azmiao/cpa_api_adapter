@@ -97,6 +97,7 @@ func testAdapterCatalogHTTPAndWebSocket(t *testing.T, network string) {
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(dir) })
 	cfg := testConfig()
+	cfg.WebSocketEnabled = true
 	cfg.SocketPath = filepath.Join(dir, "adapter.sock")
 	cfg.ListenMode = network
 	if network == "tcp" {

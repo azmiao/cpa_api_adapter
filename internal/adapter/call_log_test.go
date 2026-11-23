@@ -214,6 +214,11 @@ func TestCallLogsWebSocketCountsResponsesNotConnectionAndKeepsUsage(t *testing.T
 	}))
 	defer upstream.Close()
 	manager := callLogManager(t, upstream, "backend-api", nil)
+	cfg := manager.Status().Config
+	cfg.WebSocketEnabled = true
+	if err := manager.Configure(cfg); err != nil {
+		t.Fatal(err)
+	}
 	url := "ws://" + manager.Status().ListenAddress + "/work/backend-api/codex/responses"
 	conn, _, err := websocket.DefaultDialer.Dial(url, http.Header{"Authorization": {"Bearer client-secret"}})
 	if err != nil {

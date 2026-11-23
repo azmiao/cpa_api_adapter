@@ -93,6 +93,7 @@ func newWSRegressionFixture(t *testing.T, injectHopHeaders bool, format string) 
 	}))
 	t.Cleanup(upstream.Close)
 	cfg := testConfig()
+	cfg.WebSocketEnabled = true
 	cfg.ListenMode = "tcp"
 	cfg.ListenAddress = tcpTestAddress(t)
 	cfg.MaxBodyMB = 1

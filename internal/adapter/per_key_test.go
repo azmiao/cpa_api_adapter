@@ -117,6 +117,7 @@ func TestPerKeyStorageRoutesAndModelPolicy(t *testing.T) {
 	defer a.Close()
 	defer b.Close()
 	cfg := DefaultConfig()
+	cfg.WebSocketEnabled = true
 	cfg.APIs = []APIConfig{
 		{Name: "A", APIKey: "a-key", UpstreamAPIKey: "a-upstream-key", Upstream: a.URL, Prefix: "/a", Format: "v1", Mappings: []Model{{ID: "shared", Target: "target-a"}}},
 		{Name: "B", APIKey: "b-key", UpstreamAPIKey: "b-upstream-key", Upstream: b.URL, Prefix: "/b", Format: "backend-api", Mappings: []Model{{ID: "shared", Target: "target-b"}}},
