@@ -6,7 +6,7 @@
       "name": "CPA API Adapter",
       "description": "使用独立客户端与上游密钥分发 OpenAI / Codex 模型，支持轻量调用日志并保留限流状态与重试信息。",
       "author": "azmiao",
-      "version": "0.8.0",
+      "version": "1.0.0",
       "repository": "https://github.com/azmiao/cpa_api_adapter",
       "homepage": "https://github.com/azmiao/cpa_api_adapter",
       "license": "MIT",
