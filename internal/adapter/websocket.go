@@ -28,6 +28,9 @@ type wsTurns struct {
 	haveLast   bool
 	recent     [4]wsResponseMapping
 	nextRecent int
+	logs       *callStore
+	info       callEntry
+	trace      *callTrace
 }
 
 func (t *wsTurns) startLocked(mapping Model) {
@@ -35,9 +38,18 @@ func (t *wsTurns) startLocked(mapping Model) {
 	t.activeID = ""
 	t.busy = true
 	t.accepted = false
+	if t.logs != nil {
+		t.trace = t.logs.start(t.info, time.Time{})
+		t.trace.setModel(mapping)
+		t.trace.setStatus(http.StatusSwitchingProtocols, "", "websocket")
+	}
 }
 
 func (t *wsTurns) finishLocked() {
+	if t.trace != nil {
+		t.trace.finish("interrupted", "connection_closed")
+		t.trace = nil
+	}
 	if t.activeID != "" {
 		t.recent[t.nextRecent] = wsResponseMapping{t.activeID, t.active}
 		t.nextRecent = (t.nextRecent + 1) % len(t.recent)
@@ -172,6 +184,9 @@ func (t *wsTurns) restore(data []byte) []byte {
 	}
 	if !found && t.busy && (t.activeID == "" || id == "" || id == t.activeID) {
 		mapping, found = t.active, true
+		if t.trace != nil {
+			t.trace.addBytes(len(data), nil)
+		}
 		// Once an ID is confirmed, unowned lifecycle events cannot end the turn.
 		if t.activeID == "" || id == t.activeID {
 			switch event.Type {
@@ -182,12 +197,19 @@ func (t *wsTurns) restore(data []byte) []byte {
 				t.accepted = true
 				t.last, t.haveLast = t.active, true
 			case "response.completed":
+				if t.trace != nil {
+					t.trace.observe(scanCallMetadata(data))
+					t.trace.finish("completed", "")
+				}
 				if id != "" {
 					t.activeID = id
 				}
 				t.last, t.haveLast = t.active, true
 				t.finishLocked()
 			case "response.failed", "response.incomplete":
+				if t.trace != nil {
+					t.trace.observe(scanCallMetadata(data))
+				}
 				if id != "" {
 					t.activeID = id
 				}
@@ -195,6 +217,9 @@ func (t *wsTurns) restore(data []byte) []byte {
 			case "error":
 				// An unowned error may reject an append, not the accepted response.
 				if !t.accepted || id != "" && t.activeID != "" && id == t.activeID {
+					if t.trace != nil {
+						t.trace.observe(scanCallMetadata(data))
+					}
 					if t.activeID == "" {
 						t.activeID = id
 					}
@@ -221,8 +246,16 @@ func writeWSMessage(conn *websocket.Conn, kind int, data []byte) error {
 	return conn.WriteMessage(kind, data)
 }
 
-func (m *Manager) proxyWebSocket(w http.ResponseWriter, r *http.Request, cfg Config, api APIConfig, generation uint64) {
+func (m *Manager) proxyWebSocket(w http.ResponseWriter, r *http.Request, cfg Config, api APIConfig, generation uint64, info callEntry) {
+	started := time.Now()
+	info.Transport = "websocket"
+	logFailure := func(status int) {
+		trace := m.calls.start(info, started)
+		trace.setStatus(status, w.Header().Get("Retry-After"), "websocket")
+		trace.finish("failed", logErrorClass(status))
+	}
 	if !websocket.IsWebSocketUpgrade(r) {
+		logFailure(http.StatusBadRequest)
 		writeError(w, &apiError{http.StatusBadRequest, "此接口需要 WebSocket 升级"})
 		return
 	}
@@ -249,9 +282,11 @@ func (m *Manager) proxyWebSocket(w http.ResponseWriter, r *http.Request, cfg Con
 				}
 			}
 			w.WriteHeader(response.StatusCode)
+			logFailure(response.StatusCode)
 			_, _ = io.Copy(w, io.LimitReader(response.Body, 1<<20))
 			return
 		}
+		logFailure(http.StatusBadGateway)
 		writeError(w, &apiError{http.StatusBadGateway, "无法连接 CPA WebSocket 接口"})
 		return
 	}
@@ -271,7 +306,7 @@ func (m *Manager) proxyWebSocket(w http.ResponseWriter, r *http.Request, cfg Con
 	defer m.untrack(client, upstream)
 	client.SetReadLimit(int64(cfg.MaxBodyMB) << 20)
 	upstream.SetReadLimit(int64(cfg.MaxBodyMB) << 20)
-	turns := &wsTurns{}
+	turns := &wsTurns{logs: &m.calls, info: info}
 	var clientWrite sync.Mutex
 	done := make(chan struct{})
 	go func() {
@@ -304,6 +339,17 @@ func (m *Manager) proxyWebSocket(w http.ResponseWriter, r *http.Request, cfg Con
 		if kind == websocket.TextMessage || kind == websocket.BinaryMessage {
 			updated, err := turns.rewrite(r, api, data)
 			if err != nil {
+				meta := scanCallMetadata(data)
+				if meta.Type == "response.create" || meta.Type == "" {
+					trace := m.calls.start(info, time.Time{})
+					trace.setRequestModel(meta.Model)
+					status := http.StatusBadGateway
+					if ae, ok := err.(*apiError); ok {
+						status = ae.Status
+					}
+					trace.setStatus(status, "", "websocket")
+					trace.finish("failed", logErrorClass(status))
+				}
 				clientWrite.Lock()
 				writeErr := writeWSMessage(client, websocket.TextMessage, mappingErrorEvent(err))
 				clientWrite.Unlock()
@@ -321,6 +367,11 @@ func (m *Manager) proxyWebSocket(w http.ResponseWriter, r *http.Request, cfg Con
 	_ = upstream.Close()
 	_ = client.Close()
 	<-done
+	turns.mu.Lock()
+	if turns.trace != nil {
+		turns.finishLocked()
+	}
+	turns.mu.Unlock()
 }
 
 func relayWSClose(conn *websocket.Conn, err error) {

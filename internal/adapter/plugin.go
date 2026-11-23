@@ -73,6 +73,7 @@ func (p *RPC) Handle(method string, request []byte) ([]byte, error) {
 				map[string]any{"Method": "GET", "Path": "/plugins/" + PluginID + "/status"},
 				map[string]any{"Method": "POST", "Path": "/plugins/" + PluginID + "/validate"},
 				map[string]any{"Method": "POST", "Path": "/plugins/" + PluginID + "/catalog"},
+				map[string]any{"Method": "POST", "Path": "/plugins/" + PluginID + "/logs"},
 			},
 		}
 	case "management.handle":
@@ -113,6 +114,12 @@ func (p *RPC) handleManagement(req managementRequest) managementResponse {
 	switch req.Method + " " + req.Path[index+len(prefix):] {
 	case "GET status":
 		return managementJSON(http.StatusOK, p.Manager.Status())
+	case "POST logs":
+		query, ok := decodeCallLogQuery(req.Body)
+		if !ok {
+			return managementJSON(http.StatusBadRequest, map[string]string{"error": "日志筛选参数无效"})
+		}
+		return managementJSON(http.StatusOK, p.Manager.calls.page(query))
 	case "POST validate":
 		if len(req.Body) > 1<<20 {
 			return managementJSON(http.StatusRequestEntityTooLarge, map[string]string{"error": "配置过大"})

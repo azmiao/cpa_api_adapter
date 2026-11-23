@@ -27,6 +27,7 @@ type Manager struct {
 	lastError   string
 	generation  uint64
 	connections map[*websocket.Conn]struct{}
+	calls       callStore
 }
 
 type Status struct {

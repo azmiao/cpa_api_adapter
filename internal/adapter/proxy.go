@@ -9,6 +9,7 @@ import (
 	"path"
 	"strconv"
 	"strings"
+	"time"
 )
 
 func (m *Manager) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -18,8 +19,8 @@ func (m *Manager) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer m.active.Done()
-	var api *APIConfig
-	matchedPrefix := -1
+	var api, routeAPI *APIConfig
+	matchedPrefix, apiIndex := -1, -1
 	for i := range cfg.APIs {
 		candidate := &cfg.APIs[i]
 		suffix, matches := strings.CutPrefix(r.URL.Path, candidate.Prefix)
@@ -31,11 +32,11 @@ func (m *Manager) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		if len(candidate.Prefix) > matchedPrefix {
-			matchedPrefix = len(candidate.Prefix)
+			matchedPrefix, routeAPI = len(candidate.Prefix), candidate
 			api = nil
 		}
 		if authenticate(r.Header, candidate.APIKey) {
-			api = candidate
+			api, apiIndex = candidate, i
 		}
 	}
 	if matchedPrefix < 0 {
@@ -43,8 +44,21 @@ func (m *Manager) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if api == nil {
-		writeError(w, &apiError{http.StatusUnauthorized, "API Key 无效或不属于此路由"})
+		info := callInfo(r, *routeAPI, generation, 0, callOperation(routeAPI.Format, r.URL.Path[len(routeAPI.BasePath()):]))
+		info.APIID, info.APIName = "unauthenticated", "未鉴权"
+		trace := m.calls.start(info, time.Time{})
+		defer trace.finishHTTP(r.Context())
+		writeError(callResponseWriter{w, trace}, &apiError{http.StatusUnauthorized, "API Key 无效或不属于此路由"})
 		return
+	}
+	suffix := r.URL.Path[len(api.Prefix)+len(api.Format)+1:]
+	info := callInfo(r, *api, generation, apiIndex, callOperation(api.Format, suffix))
+	wsRoute := r.Method == http.MethodGet && (api.Format == "v1" && suffix == "/responses" || api.Format == "backend-api" && suffix == "/codex/responses")
+	var trace *callTrace
+	if !wsRoute || path.Clean(r.URL.Path) != r.URL.Path {
+		trace = m.calls.start(info, time.Time{})
+		defer trace.finishHTTP(r.Context())
+		w = callResponseWriter{w, trace}
 	}
 	if path.Clean(r.URL.Path) != r.URL.Path {
 		writeError(w, &apiError{http.StatusBadRequest, "请求路径必须是规范路径"})
@@ -53,8 +67,6 @@ func (m *Manager) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	r.Header.Set("Authorization", "Bearer "+api.UpstreamAPIKey)
 	r.Header.Del("X-Api-Key")
 	r.Header.Del("X-Goog-Api-Key")
-	suffix := r.URL.Path[len(api.Prefix)+len(api.Format)+1:]
-	wsRoute := r.Method == http.MethodGet && (api.Format == "v1" && suffix == "/responses" || api.Format == "backend-api" && suffix == "/codex/responses")
 	if !wsRoute && requestsUpgrade(r.Header) {
 		writeError(w, &apiError{http.StatusBadRequest, "此路径不支持协议升级"})
 		return
@@ -79,11 +91,11 @@ func (m *Manager) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		_, _ = w.Write(body)
 	case wsRoute:
-		m.proxyWebSocket(w, r, cfg, *api, generation)
+		m.proxyWebSocket(w, r, cfg, *api, generation, info)
 	case api.Format == "v1":
-		m.proxyResponse(w, r, cfg, *api)
+		m.proxyResponse(w, r, cfg, *api, trace)
 	case r.Method == http.MethodPost && (suffix == "/codex/responses" || suffix == "/codex/responses/compact"):
-		m.proxyResponse(w, r, cfg, *api)
+		m.proxyResponse(w, r, cfg, *api, trace)
 	default:
 		http.NotFound(w, r)
 	}
@@ -109,11 +121,14 @@ func authenticate(headers http.Header, expected string) bool {
 	return found
 }
 
-func (m *Manager) proxyResponse(w http.ResponseWriter, r *http.Request, cfg Config, api APIConfig) {
+func (m *Manager) proxyResponse(w http.ResponseWriter, r *http.Request, cfg Config, api APIConfig, trace *callTrace) {
 	limit := int64(cfg.MaxBodyMB) << 20
 	if r.ContentLength > limit {
 		writeError(w, &apiError{http.StatusRequestEntityTooLarge, "请求体超过配置的大小限制"})
 		return
+	}
+	if r.Body != nil {
+		r.Body = &callObservedBody{ReadCloser: r.Body, trace: trace, request: true}
 	}
 	upstreamPath := r.URL.Path[len(api.Prefix)+len(api.Format)+1:]
 	resourceID := responseResourceID(api, upstreamPath)
@@ -142,6 +157,7 @@ func (m *Manager) proxyResponse(w http.ResponseWriter, r *http.Request, cfg Conf
 	} else {
 		r.Body = http.MaxBytesReader(w, r.Body, limit)
 	}
+	trace.setModel(mapped)
 	if api.Format == "v1" && strings.HasPrefix(upstreamPath, "/models/") && len(api.Mappings) > 0 {
 		mapping, ok := api.Mapping(strings.TrimPrefix(upstreamPath, "/models/"))
 		if !ok {
@@ -150,6 +166,7 @@ func (m *Manager) proxyResponse(w http.ResponseWriter, r *http.Request, cfg Conf
 		}
 		upstreamPath = "/models/" + mapping.Target
 		mapped, changed = mapping, mapping.ID != mapping.Target
+		trace.setModel(mapped)
 	}
 	proxy := &httputil.ReverseProxy{
 		Transport: localTransport,
@@ -179,6 +196,7 @@ func (m *Manager) proxyResponse(w http.ResponseWriter, r *http.Request, cfg Conf
 				writeError(w, ae)
 			default:
 				writeError(w, &apiError{http.StatusBadGateway, "无法连接 CPA 推理接口"})
+				trace.setErrorClass("connection_error")
 			}
 		},
 		ModifyResponse: func(resp *http.Response) error {
@@ -198,11 +216,15 @@ func (m *Manager) proxyResponse(w http.ResponseWriter, r *http.Request, cfg Conf
 					return err
 				}
 				setJSONResponse(resp, restoreJSON(body, mapping))
+				observeCallResponse(resp, trace)
 				return nil
 			}
 			if changed && r.Method != http.MethodHead {
-				return restoreResponse(resp, mapped, limit)
+				if err := restoreResponse(resp, mapped, limit); err != nil {
+					return err
+				}
 			}
+			observeCallResponse(resp, trace)
 			return nil
 		},
 	}
