@@ -22,12 +22,13 @@ const defaultListenAddress = "127.0.0.1:18318"
 var errMissingUpstreamAPIKey = errors.New("CPA 上游 API Key 必填；请填写新的私有 CPA Key，并从 CPA 删除已分发的旧 Key")
 
 type Config struct {
-	ListenMode    string      `json:"listen_mode" yaml:"listen_mode"`
-	ListenAddress string      `json:"listen_address" yaml:"listen_address"`
-	SocketPath    string      `json:"socket_path" yaml:"socket_path"`
-	SocketMode    string      `json:"socket_mode" yaml:"socket_mode"`
-	MaxBodyMB     int         `json:"max_body_mb" yaml:"max_body_mb"`
-	APIs          []APIConfig `json:"apis" yaml:"apis"`
+	ListenMode       string      `json:"listen_mode" yaml:"listen_mode"`
+	ListenAddress    string      `json:"listen_address" yaml:"listen_address"`
+	SocketPath       string      `json:"socket_path" yaml:"socket_path"`
+	SocketMode       string      `json:"socket_mode" yaml:"socket_mode"`
+	MaxBodyMB        int         `json:"max_body_mb" yaml:"max_body_mb"`
+	WebSocketEnabled bool        `json:"websocket_enabled" yaml:"websocket_enabled"`
+	APIs             []APIConfig `json:"apis" yaml:"apis"`
 }
 
 type APIConfig struct {

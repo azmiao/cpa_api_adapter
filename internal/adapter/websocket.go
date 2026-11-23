@@ -254,6 +254,11 @@ func (m *Manager) proxyWebSocket(w http.ResponseWriter, r *http.Request, cfg Con
 		trace.setStatus(status, w.Header().Get("Retry-After"), "websocket")
 		trace.finish("failed", logErrorClass(status))
 	}
+	if !cfg.WebSocketEnabled {
+		logFailure(http.StatusForbidden)
+		writeError(w, &apiError{http.StatusForbidden, "WebSocket 已禁用，请在通用设置中启用或使用 HTTP/SSE"})
+		return
+	}
 	if !websocket.IsWebSocketUpgrade(r) {
 		logFailure(http.StatusBadRequest)
 		writeError(w, &apiError{http.StatusBadRequest, "此接口需要 WebSocket 升级"})
