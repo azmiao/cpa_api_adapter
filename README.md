@@ -174,7 +174,7 @@ services:
 
 3. 在当前 API 的「接入」页选择 Caddy 或 Nginx，点击「复制配置」。放入已有反代站点，保留原有 CPA 转发规则，检查配置后重载反代。
 
-   Nginx 片段中的 `map` / `upstream` 放在 `http {}` 内，同一套接字只添加一次；各 API 的 `location` 放在站点的 `server {}` 内。共享连接池使用 `keepalive 32`，普通 HTTP 请求不再强制关闭连接。
+   Nginx 片段中的 `upstream` 放在 `http {}` 内，同一套接字只添加一次；各 API 的 `location` 放在站点的 `server {}` 内。共享连接池使用 `keepalive 32`，普通 HTTP 请求不再强制关闭连接。WebSocket 默认禁用，片段不包含升级配置；启用时还需添加同样放在 `http {}` 内的共享 `map`，并更新各 API 的 `location`。
 
 ![Unix 模式选择代理软件并复制生成的反代配置；图中为填写示例的预览](docs/images/13-unix-proxy-copy.png)
 
@@ -291,6 +291,10 @@ providers:
 
 插件提供 Codex 风格目录、模型别名与能力配置，以及 Responses 的 HTTP / SSE / WebSocket 和 compact 转发。上游仍须支持相应模型与接口；**不会把 Chat Completions 转换为 Responses**。
 
+**WebSocket 默认禁用。** 在「通用设置」将「WebSocket」设为「启用」，点击「保存全部」后生效；配置字段为 `websocket_enabled`，旧配置未填写时也按 `false` 处理。关闭时两个 WebSocket 入口返回 `403`，不会连接上游，已有 WebSocket 连接会断开；HTTP、SSE 和 compact 转发不受影响。使用 Nginx 反代时，启用后需重新复制「接入」页生成的升级配置并重载 Nginx；直连 TCP 不需要 Nginx。
+
+管理页面随窗口宽度伸展，主容器最大 1920px；桌面两侧保留 32px 内边距，窄屏沿用单列布局。调用日志表格在空间不足时仅于表格内部横向滚动。
+
 ## 调用日志
 
 插件页面的顶层页签为「API配置｜调用日志｜通用设置」。连接管理中心后，打开「调用日志」查看记录，按 API、模型、结果筛选，每页最多 50 条。只有日志页可见时才每 5 秒刷新；「刷新」返回最新一页。筛选和翻页不会修改或保存 API 配置。
@@ -325,6 +329,7 @@ providers:
 | 「获取模型」失败 / 返回 401 | CPA 上游 Key 必须是 CPA 有效的私有客户端 Key，不是插件 Key 或管理密钥；CPA 内部地址必须指向 CPA 原有端口。 |
 | 已配置模型提示「暂未出现在 CPA 目录中」 | 不必删除白名单。客户端仍可尝试配置的模型；实际限流按 CPA 返回的 `429` / `Retry-After` 等待，真实不存在则由 CPA 返回 `404`。 |
 | 已保存，但插件未就绪 | 在「通用设置」看实际监听状态；检查端口占用、目录是否存在，再保存。 |
+| WebSocket 返回 403「已禁用」 | 在「通用设置」启用 WebSocket 并保存，或让客户端使用 HTTP/SSE；经 Nginx 接入时还需配置协议升级。 |
 | Unix 反代连不上 | 两个容器是否挂载同一目录？CPA 能否写入、反代是否具有套接字访问权限？ |
 | TCP 远端连不上 | 反代连接的是 CPA 宿主机 IP:发布端口吗？检查 Docker 端口发布与防火墙。 |
 
