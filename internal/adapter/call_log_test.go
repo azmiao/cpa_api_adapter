@@ -262,6 +262,59 @@ func TestCallLogsWebSocketCountsResponsesNotConnectionAndKeepsUsage(t *testing.T
 	}
 }
 
+func TestCallLogsDisabledWebSocketDoesNotAffectSummary(t *testing.T) {
+	for _, format := range []string{"v1", "backend-api"} {
+		t.Run(format, func(t *testing.T) {
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				io.WriteString(w, `{"model":"target","output":[]}`)
+			}))
+			defer upstream.Close()
+			manager := callLogManager(t, upstream, format, nil)
+			cfg := manager.Status().Config
+			cfg.WebSocketEnabled = false
+			if err := manager.Configure(cfg); err != nil {
+				t.Fatal(err)
+			}
+			path := cfg.APIs[0].BasePath() + "/responses"
+			if format == "backend-api" {
+				path = cfg.APIs[0].BasePath() + "/codex/responses"
+			}
+			if response := callLogRequest(t, manager, path, `{"model":"target"}`); response.Code != http.StatusOK {
+				t.Fatalf("HTTP call failed: %d %s", response.Code, response.Body)
+			}
+			before := manager.calls.page(callLogQuery{})
+			if len(before.Entries) != 1 || before.Summary.Completed != 1 || before.Summary.Failed != 0 || before.Summary.Finished != 1 {
+				t.Fatalf("HTTP success was not counted: %+v", before)
+			}
+			base := "http://" + manager.Status().ListenAddress + path
+			for _, upgrade := range []bool{true, false} {
+				var status int
+				if upgrade {
+					conn, response, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(base, "http"), http.Header{"Authorization": {"Bearer client-secret"}})
+					if conn != nil {
+						conn.Close()
+					}
+					if err == nil || response == nil {
+						t.Fatalf("disabled WebSocket accepted: %v", err)
+					}
+					status = response.StatusCode
+					response.Body.Close()
+				} else {
+					status, _ = regressionRequest(t, http.MethodGet, base, nil, nil)
+				}
+				if status != http.StatusForbidden {
+					t.Fatalf("disabled endpoint upgrade=%v returned %d", upgrade, status)
+				}
+				after := manager.calls.page(callLogQuery{})
+				if after.Summary != before.Summary || len(after.Entries) != 1 || after.Entries[0].ID != before.Entries[0].ID {
+					t.Fatalf("disabled WebSocket changed HTTP logs or success statistics: before=%+v after=%+v", before, after)
+				}
+			}
+		})
+	}
+}
+
 func TestCallLogsAverageIncludesRetainedFinishedCallsWhenActiveOverflows(t *testing.T) {
 	var store callStore
 	info := callEntry{APIID: "a", Result: "running", Usage: emptyCallUsage()}
