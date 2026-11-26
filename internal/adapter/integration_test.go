@@ -23,11 +23,12 @@ import (
 
 func TestAdapterCatalogHTTPAndWebSocket(t *testing.T) {
 	for _, network := range []string{"unix", "tcp"} {
-		t.Run(network, func(t *testing.T) { testAdapterCatalogHTTPAndWebSocket(t, network) })
+		t.Run(network+"/unprefixed", func(t *testing.T) { testAdapterCatalogHTTPAndWebSocket(t, network, "") })
+		t.Run(network+"/shared", func(t *testing.T) { testAdapterCatalogHTTPAndWebSocket(t, network, "adapter") })
 	}
 }
 
-func testAdapterCatalogHTTPAndWebSocket(t *testing.T, network string) {
+func testAdapterCatalogHTTPAndWebSocket(t *testing.T, network, sharedPrefix string) {
 	requests := make(chan string, 32)
 	var catalogCalls atomic.Int32
 	upgrader := websocket.Upgrader{}
@@ -98,6 +99,7 @@ func testAdapterCatalogHTTPAndWebSocket(t *testing.T, network string) {
 	t.Cleanup(func() { _ = os.RemoveAll(dir) })
 	cfg := testConfig()
 	cfg.WebSocketEnabled = true
+	cfg.SharedPrefix = sharedPrefix
 	cfg.SocketPath = filepath.Join(dir, "adapter.sock")
 	cfg.ListenMode = network
 	if network == "tcp" {
@@ -107,6 +109,21 @@ func testAdapterCatalogHTTPAndWebSocket(t *testing.T, network string) {
 	cfg.APIs[0].Mappings = []Model{
 		{ID: "work", Target: "account-a/gpt", DisplayName: "工作模型", ContextWindow: 12345, InputModalities: []string{"text"}},
 		{ID: "personal", Target: "account-b/gpt"},
+	}
+	var root string
+	if sharedPrefix != "" {
+		root = "/" + sharedPrefix
+		other := cfg.APIs[0]
+		other.Prefix, other.APIKey = "/other", "other-client-secret"
+		cfg.APIs = append(cfg.APIs, other)
+	}
+	configYAML, err := json.Marshal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = ParseConfig(configYAML)
+	if err != nil {
+		t.Fatal(err)
 	}
 	manager := NewManager()
 	if err := manager.Configure(cfg); err != nil || !manager.Status().Running {
@@ -126,15 +143,19 @@ func testAdapterCatalogHTTPAndWebSocket(t *testing.T, network string) {
 		}
 		return (&net.Dialer{}).DialContext(ctx, network, address)
 	}}
+	adapterMatch := cfg.APIs[0].BasePath() + "/"
+	if root != "" {
+		adapterMatch = root + "/"
+	}
 	front := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasPrefix(r.URL.Path, cfg.APIs[0].BasePath()+"/") {
+		if strings.HasPrefix(r.URL.Path, adapterMatch) {
 			adapterProxy.ServeHTTP(w, r)
 			return
 		}
 		cpaProxy.ServeHTTP(w, r)
 	}))
 	defer front.Close()
-	base := front.URL + cfg.APIs[0].BasePath()
+	base := front.URL + root + cfg.APIs[0].BasePath()
 	client := &http.Client{Timeout: 10 * time.Second}
 	do := func(method, path, body, key string) (int, string) {
 		t.Helper()
@@ -168,6 +189,32 @@ func testAdapterCatalogHTTPAndWebSocket(t *testing.T, network string) {
 		_ = resp.Body.Close()
 		if resp.StatusCode != http.StatusUnauthorized || len(requests) != 0 {
 			t.Fatalf("plugin key bypassed the model policy through direct CPA: %d", resp.StatusCode)
+		}
+	}
+	if root != "" {
+		doCatalog := func(endpoint, key string, want int) {
+			t.Helper()
+			req, err := http.NewRequest(http.MethodGet, endpoint+"/models?client_version=9.9.9", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			req.Header.Set("Authorization", "Bearer "+key)
+			resp, err := client.Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_ = resp.Body.Close()
+			if resp.StatusCode != want {
+				t.Fatalf("%s: got %d, want %d", endpoint, resp.StatusCode, want)
+			}
+		}
+		otherBase := front.URL + root + cfg.APIs[1].BasePath()
+		doCatalog(otherBase, "other-client-secret", http.StatusOK)
+		doCatalog(otherBase, "client-secret", http.StatusUnauthorized)
+		adapter := httptest.NewServer(manager)
+		defer adapter.Close()
+		for _, prefix := range []string{"", root + "-other"} {
+			doCatalog(adapter.URL+prefix+cfg.APIs[0].BasePath(), "client-secret", http.StatusNotFound)
 		}
 	}
 
@@ -207,7 +254,7 @@ func testAdapterCatalogHTTPAndWebSocket(t *testing.T, network string) {
 	}
 
 	header := http.Header{"Authorization": []string{"Bearer client-secret"}}
-	conn, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(front.URL, "http")+cfg.APIs[0].BasePath()+"/codex/responses", header)
+	conn, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(base, "http")+"/codex/responses", header)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -287,6 +334,11 @@ func testAdapterCatalogHTTPAndWebSocket(t *testing.T, network string) {
 	if request = <-requests; request != `/backend-api/codex/responses {"model":"account-z/gpt"}` {
 		t.Fatalf("missing target was not forwarded to CPA: %s", request)
 	}
+	for _, entry := range manager.calls.page(callLogQuery{}).Entries {
+		if entry.APIPath != root+cfg.APIs[0].BasePath() && (root == "" || entry.APIPath != root+cfg.APIs[1].BasePath()) {
+			t.Fatalf("unexpected logged API path: %q", entry.APIPath)
+		}
+	}
 }
 
 func TestConfigurationRejectsUnsafeSettings(t *testing.T) {
@@ -304,6 +356,19 @@ func TestConfigurationRejectsUnsafeSettings(t *testing.T) {
 	cfg.APIs[0].Upstream = "http://127.0.0.1:8317/work"
 	if err := cfg.Validate(); err == nil {
 		t.Fatal("adapter prefix accepted as CPA upstream")
+	}
+	for _, prefix := range []string{"/adapter", "adapter/other", "adapter*", "..", "adapter%2F", "a b"} {
+		cfg = testConfig()
+		cfg.SharedPrefix = prefix
+		if err := cfg.Validate(); err == nil {
+			t.Errorf("accepted invalid shared prefix %q", prefix)
+		}
+	}
+	cfg = testConfig()
+	cfg.SharedPrefix = "adapter"
+	cfg.APIs[0].Upstream = "http://127.0.0.1:8317/adapter/work"
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("shared adapter route accepted as CPA upstream")
 	}
 }
 
