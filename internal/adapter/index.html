@@ -71,6 +71,7 @@
 <label id="tcp-settings" class="full" hidden>TCP 监听地址<input id="listen-address" autocomplete="off" placeholder="127.0.0.1:18318"></label>
 <fieldset id="unix-settings" class="grid full"><label class="full">本地套接字路径<input id="socket-path" required></label><label>套接字权限<select id="socket-mode"><option value="0660">0660</option><option value="0600">0600</option><option value="0666">0666</option></select></label></fieldset>
 <div class="full"><label>实际监听地址</label><code id="listen-status">未监听</code></div>
+<label class="full">统一前缀<input id="shared-prefix" autocomplete="off" placeholder="adapter" aria-describedby="shared-prefix-hint"><small id="shared-prefix-hint" class="field-hint">默认留空，不改变现有地址。CPA 在 Docker、反代在同一台宿主机时，建议填 adapter（不带 /），只需配置一次 /adapter/*，各 API 的路由前缀保持不变。</small></label>
 <label>请求/消息上限（MB）<input id="max-body" type="number" min="1" max="512" step="1" required><small class="field-hint">限制请求体、改写响应、SSE 事件和 WebSocket 消息。</small></label>
 <label>WebSocket<select id="websocket-enabled"><option value="false">禁用</option><option value="true">启用</option></select><small class="field-hint">默认禁用，不影响 HTTP/SSE；启用后，Nginx 反代需支持协议升级。</small></label>
 </div><div class="notice">插件 API Key 和 CPA 上游 API Key 保存在 CPA 配置文件中；管理密钥仅保存在当前页面内存中，用于管理操作。</div></section>
@@ -209,11 +210,16 @@ function storeActive(){
   if(item.upstream_api_key!==upstreamKey||item.upstream!==upstream||item.format!==format){catalogs.delete(item);message('catalog-message','');}
   Object.assign(item,{name:$('api-name').value.trim(),api_key:$('api-key').value.trim(),upstream_api_key:upstreamKey,prefix:$('api-prefix').value.trim(),upstream,format,mappings:collectMappings()});
 }
-function collect(){storeActive();return {listen_mode:$('listen-mode').value,listen_address:$('listen-address').value.trim(),socket_path:$('socket-path').value.trim(),socket_mode:$('socket-mode').value,max_body_mb:Number($('max-body').value),websocket_enabled:$('websocket-enabled').value==='true',apis:structuredClone(apis)};}
+function sharedPrefix(){return $('shared-prefix').value.trim();}
+function validSharedPrefix(value){return !value||/^[A-Za-z0-9_-]+$/.test(value);}
+const invalidSharedPrefix='统一前缀只能包含字母、数字、下划线和连字符，例如 adapter';
+function apiBasePath(item,prefix){return item.prefix?(prefix?'/'+prefix:'')+item.prefix+'/'+item.format:'';}
+function collect(){storeActive();return {listen_mode:$('listen-mode').value,listen_address:$('listen-address').value.trim(),socket_path:$('socket-path').value.trim(),socket_mode:$('socket-mode').value,shared_prefix:sharedPrefix(),max_body_mb:Number($('max-body').value),websocket_enabled:$('websocket-enabled').value==='true',apis:structuredClone(apis)};}
 function renderAPIs(){
+  const prefix=sharedPrefix(),validPrefix=validSharedPrefix(prefix);
   $('api-list').replaceChildren();apis.forEach((item,i)=>{
     const button=document.createElement('button');button.type='button';button.className='api-item';button.setAttribute('aria-current',String(i===active));
-    const name=document.createElement('span');name.textContent=item.name||'API '+(i+1);const path=document.createElement('code');path.textContent=item.prefix?item.prefix+'/'+item.format:'未设置前缀';button.append(name,path);
+    const name=document.createElement('span');name.textContent=item.name||'API '+(i+1);const path=document.createElement('code');path.textContent=validPrefix?(apiBasePath(item,prefix)||'未设置路由前缀'):'统一前缀无效';button.append(name,path);
     button.addEventListener('click',()=>{storeActive();showAPI(i);});$('api-list').append(button);
   });
   $('api-title').textContent=active<0?'API':apis[active].name||'API '+(active+1);
@@ -258,26 +264,30 @@ function proxyID(value){
   return hash.toString(16).padStart(16,'0');
 }
 function address(){
-  if(active<0)return;const item=apis[active],base=item.prefix?item.prefix+'/'+item.format:'',tcp=$('listen-mode').value==='tcp',origin=tcp?listenerOrigin($('listen-address').value):location.origin,baseURL=origin?origin+base:'';
-  $('base-url').textContent=base?(baseURL||'请填写有效的 TCP 监听地址'):'请填写路由前缀';$('copy-url').disabled=!base||!baseURL;$('copy-proxy').disabled=true;
+  if(active<0)return;
+  const item=apis[active],prefix=sharedPrefix(),validPrefix=validSharedPrefix(prefix),base=validPrefix?apiBasePath(item,prefix):'',tcp=$('listen-mode').value==='tcp',origin=tcp?listenerOrigin($('listen-address').value):location.origin,baseURL=origin&&base?origin+base:'';
+  $('base-url').textContent=!validPrefix?invalidSharedPrefix:base?(baseURL||'请填写有效的 TCP 监听地址'):'请填写路由前缀';$('copy-url').disabled=!baseURL;$('copy-proxy').disabled=true;
   $('address-hint').textContent=tcp?(/^(?:0\.0\.0\.0|\[::\]|\[::ffff:(?:0:0|0\.0\.0\.0)\]):/i.test($('listen-address').value.trim())?'监听通配地址，预览使用管理页面主机名；请确认客户端可达此主机和端口。':'直连 HTTP 地址；反代、HTTPS 或端口映射请在客户端使用实际入口。'):'地址按管理页面 Origin 生成；完成本机反代后可用，其他入口请在客户端配置。';
   if(tcp){$('proxy-snippet').textContent='';return;}
+  if(!validPrefix){$('proxy-snippet').textContent=invalidSharedPrefix;return;}
   const socket=$('socket-path').value.trim().replace(/\\/g,'/');
-  if(!base||!/^\/(?:[\p{L}\p{N}_~.!$&'()+,;=:@-]+\/)*[\p{L}\p{N}_~.!$&'()+,;=:@-]+$/u.test(item.prefix)||/[\s;{}$#"'\\]/.test(base)){$('proxy-snippet').textContent='请填写可用于代理配置的路由前缀';return;}
+  if(!prefix&&(!base||!/^\/(?:[\p{L}\p{N}_~.!$&'()+,;=:@-]+\/)*[\p{L}\p{N}_~.!$&'()+,;=:@-]+$/u.test(item.prefix)||/[\s;{}$#"'\\]/.test(base))){$('proxy-snippet').textContent='请填写可用于代理配置的路由前缀';return;}
+  const proxyPath=prefix?'/'+prefix:base;
   const proxyType=$('proxy-type').value;let upstream;
   if(proxyType==='caddy'&&!/[\r\n{}]/.test(socket))upstream='unix/'+socket;
   else if(!socket.startsWith('/')||/[\s:;{}$#"'\\]/.test(socket)){$('proxy-snippet').textContent='此套接字路径不适用于 Nginx 配置，请选择 Caddy';return;}
   if(proxyType==='caddy'){
-    const matcher='adapter_'+proxyID(socket+'\0'+base);$('proxy-snippet').textContent='@'+matcher+' path '+base+'/*\nhandle @'+matcher+' {\n    reverse_proxy '+JSON.stringify(upstream)+'\n}';
+    const matcher='adapter_'+proxyID(socket+'\0'+proxyPath);$('proxy-snippet').textContent='@'+matcher+' path '+proxyPath+'/*\nhandle @'+matcher+' {\n    reverse_proxy '+JSON.stringify(upstream)+'\n}';
   }else{
     const maxBody=Number($('max-body').value);if(!$('max-body').checkValidity()||!Number.isInteger(maxBody)){$('proxy-snippet').textContent='请填写 1–512 MB 的整数请求/消息上限';return;}
     const id=proxyID(socket),name='cpa_adapter_'+id,connection='adapter_upgrade_'+id;
     const websocket=$('websocket-enabled').value==='true',map=websocket?'map $http_upgrade $'+connection+' {\n    default upgrade;\n    \'\' \'\';\n}\n\n':'',upgrade=websocket?'    proxy_set_header Upgrade $http_upgrade;\n    proxy_set_header Connection $'+connection+';\n':'    proxy_set_header Connection "";\n';
-    $('proxy-snippet').textContent='# http {} 内：同一套接字的共享 '+(websocket?'map/upstream':'upstream')+' 仅添加一次。\n'+map+'upstream '+name+' {\n    server unix:'+socket+';\n    keepalive 32;\n}\n\n# 现有 server {} 内；其他 API 仅添加对应 location，复用上方配置。\nlocation ^~ '+base+'/ {\n    client_max_body_size '+maxBody+'m;\n    proxy_pass http://'+name+';\n    proxy_http_version 1.1;\n    proxy_set_header Host $host;\n'+upgrade+'    proxy_buffering off;\n    proxy_cache off;\n    proxy_request_buffering off;\n    proxy_read_timeout 3600s;\n    proxy_send_timeout 3600s;\n}';
+    const locationNote=prefix?'同一统一前缀下的所有 API 共用此 location。':'其他 API 仅添加对应 location，复用上方配置。';
+    $('proxy-snippet').textContent='# http {} 内：同一套接字的共享 '+(websocket?'map/upstream':'upstream')+' 仅添加一次。\n'+map+'upstream '+name+' {\n    server unix:'+socket+';\n    keepalive 32;\n}\n\n# 现有 server {} 内；'+locationNote+'\nlocation ^~ '+proxyPath+'/ {\n    client_max_body_size '+maxBody+'m;\n    proxy_pass http://'+name+';\n    proxy_http_version 1.1;\n    proxy_set_header Host $host;\n'+upgrade+'    proxy_buffering off;\n    proxy_cache off;\n    proxy_request_buffering off;\n    proxy_read_timeout 3600s;\n    proxy_send_timeout 3600s;\n}';
   }
   $('copy-proxy').disabled=false;
 }
-function populate(cfg){$('listen-mode').value=cfg.listen_mode||'unix';$('listen-address').value=cfg.listen_address||'127.0.0.1:18318';$('socket-path').value=cfg.socket_path;$('socket-mode').value=cfg.socket_mode;$('max-body').value=cfg.max_body_mb;$('websocket-enabled').value=String(cfg.websocket_enabled===true);apis=structuredClone(cfg.apis||[]);$('proxy-type').value=$('listen-mode').value==='unix'&&/^[A-Za-z]:[\\/]/.test(cfg.socket_path)?'caddy':'nginx';for(const id of ['listen-mode','socket-mode','proxy-type','websocket-enabled'])syncSelect($(id));syncListenerSettings();showAPI(apis.length?0:-1);dirty=false;$('save-state').textContent='已保存';const missing=apis.filter(item=>!item.upstream_api_key).length;message('message',missing?'有 '+missing+' 条 API 缺少 CPA 上游 API Key：请保留插件 API Key，补填独立上游 Key，并从 CPA 移除已分发的旧 Key。':'');}
+function populate(cfg){$('listen-mode').value=cfg.listen_mode||'unix';$('listen-address').value=cfg.listen_address||'127.0.0.1:18318';$('socket-path').value=cfg.socket_path;$('socket-mode').value=cfg.socket_mode;$('shared-prefix').value=cfg.shared_prefix||'';$('max-body').value=cfg.max_body_mb;$('websocket-enabled').value=String(cfg.websocket_enabled===true);apis=structuredClone(cfg.apis||[]);$('proxy-type').value=$('listen-mode').value==='unix'&&/^[A-Za-z]:[\\/]/.test(cfg.socket_path)?'caddy':'nginx';for(const id of ['listen-mode','socket-mode','proxy-type','websocket-enabled'])syncSelect($(id));syncListenerSettings();showAPI(apis.length?0:-1);dirty=false;$('save-state').textContent='已保存';const missing=apis.filter(item=>!item.upstream_api_key).length;message('message',missing?'有 '+missing+' 条 API 缺少 CPA 上游 API Key：请保留插件 API Key，补填独立上游 Key，并从 CPA 移除已分发的旧 Key。':'');}
 async function connect(key,automatic=false){
   const input=$('management-key'),button=$('login-form').querySelector('button');if(button.disabled)return;
   button.disabled=true;input.disabled=true;managementKey=key.trim();$('status').textContent=automatic?'正在自动连接':'正在连接';message('login-message',automatic?'正在使用 CPA 登录信息连接…':'');
@@ -320,10 +330,11 @@ async function copyElement(id){
   message('copy-message',copied?'已复制':'内容已选中，请手动复制',copied);
 }
 $('copy-url').addEventListener('click',()=>copyElement('base-url'));$('copy-proxy').addEventListener('click',()=>copyElement('proxy-snippet'));
-function normalize(cfg){return {listen_mode:cfg.listen_mode||'unix',listen_address:cfg.listen_address||'127.0.0.1:18318',socket_path:cfg.socket_path,socket_mode:cfg.socket_mode,max_body_mb:cfg.max_body_mb,websocket_enabled:cfg.websocket_enabled===true,apis:(cfg.apis||[]).map(item=>({name:item.name||'',api_key:item.api_key,upstream_api_key:item.upstream_api_key,upstream:item.upstream,prefix:item.prefix,format:item.format,mappings:(item.mappings||[]).map(model=>({id:model.id,target:model.target,display_name:model.display_name||'',context_window:model.context_window||0,max_context_window:model.max_context_window||0,max_tokens:model.max_tokens||0,input_modalities:model.input_modalities||[],reasoning_levels:model.reasoning_levels||[],default_reasoning:model.default_reasoning||''}))}))};}
+function normalize(cfg){return {listen_mode:cfg.listen_mode||'unix',listen_address:cfg.listen_address||'127.0.0.1:18318',socket_path:cfg.socket_path,socket_mode:cfg.socket_mode,shared_prefix:cfg.shared_prefix||'',max_body_mb:cfg.max_body_mb,websocket_enabled:cfg.websocket_enabled===true,apis:(cfg.apis||[]).map(item=>({name:item.name||'',api_key:item.api_key,upstream_api_key:item.upstream_api_key,upstream:item.upstream,prefix:item.prefix,format:item.format,mappings:(item.mappings||[]).map(model=>({id:model.id,target:model.target,display_name:model.display_name||'',context_window:model.context_window||0,max_context_window:model.max_context_window||0,max_tokens:model.max_tokens||0,input_modalities:model.input_modalities||[],reasoning_levels:model.reasoning_levels||[],default_reasoning:model.default_reasoning||''}))}))};}
 $('save').addEventListener('click',async()=>{
   if(!$('max-body').reportValidity())return;
-  const cfg=collect(),validationError=keyError(cfg.apis);if(validationError){message('message',validationError);return;}
+  const cfg=collect();if(!validSharedPrefix(cfg.shared_prefix)){selectTab($('tab-settings'));$('shared-prefix').focus();message('message',invalidSharedPrefix);return;}
+  const validationError=keyError(cfg.apis);if(validationError){message('message',validationError);return;}
   const button=$('save');button.disabled=true;saving=true;stopStatusPolling();message('message','正在保存…',true);
   try{
     const savedRevision=revision;await api(management+'validate',{method:'POST',body:JSON.stringify(cfg)});await api(configURL,{method:'PATCH',body:JSON.stringify(cfg)});

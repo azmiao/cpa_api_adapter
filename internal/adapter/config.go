@@ -26,6 +26,7 @@ type Config struct {
 	ListenAddress    string      `json:"listen_address" yaml:"listen_address"`
 	SocketPath       string      `json:"socket_path" yaml:"socket_path"`
 	SocketMode       string      `json:"socket_mode" yaml:"socket_mode"`
+	SharedPrefix     string      `json:"shared_prefix" yaml:"shared_prefix"`
 	MaxBodyMB        int         `json:"max_body_mb" yaml:"max_body_mb"`
 	WebSocketEnabled bool        `json:"websocket_enabled" yaml:"websocket_enabled"`
 	APIs             []APIConfig `json:"apis" yaml:"apis"`
@@ -146,10 +147,19 @@ func (c Config) Validate() error {
 	if c.MaxBodyMB < 1 || c.MaxBodyMB > 512 {
 		return fmt.Errorf("请求大小限制必须在 1 到 512 MB 之间")
 	}
+	for _, ch := range c.SharedPrefix {
+		if !(ch >= 'a' && ch <= 'z' || ch >= 'A' && ch <= 'Z' || ch >= '0' && ch <= '9' || ch == '_' || ch == '-') {
+			return fmt.Errorf("统一前缀只能包含字母、数字、下划线和连字符，例如 adapter")
+		}
+	}
+	var sharedRoot string
+	if c.SharedPrefix != "" {
+		sharedRoot = "/" + c.SharedPrefix
+	}
 	identities := make(map[[3]string]bool, len(c.APIs))
 	upstreamKeys := make(map[string]struct{}, len(c.APIs))
 	for i, api := range c.APIs {
-		if err := api.Validate(); err != nil {
+		if err := api.validate(sharedRoot); err != nil {
 			return fmt.Errorf("第 %d 个 API: %w", i+1, err)
 		}
 		identity := [3]string{api.Prefix, api.Format, api.APIKey}
@@ -177,6 +187,10 @@ func (c Config) listenEndpoint() (string, string) {
 }
 
 func (c APIConfig) Validate() error {
+	return c.validate("")
+}
+
+func (c APIConfig) validate(sharedRoot string) error {
 	if c.APIKey == "" || strings.ContainsAny(c.APIKey, " \r\n\t") {
 		return fmt.Errorf("插件 API Key 必填且不能包含空白")
 	}
@@ -200,7 +214,8 @@ func (c APIConfig) Validate() error {
 		return fmt.Errorf("出口格式只能是 v1 或 backend-api")
 	}
 	upstreamPath := strings.TrimRight(u.Path, "/")
-	if upstreamPath == c.Prefix || strings.HasPrefix(upstreamPath, c.Prefix+"/") {
+	if upstreamPath == c.Prefix || strings.HasPrefix(upstreamPath, c.Prefix+"/") ||
+		sharedRoot != "" && (upstreamPath == sharedRoot || strings.HasPrefix(upstreamPath, sharedRoot+"/")) {
 		return fmt.Errorf("CPA 内部地址不能指向适配路由，否则可能循环转发")
 	}
 	seen := map[string]bool{}

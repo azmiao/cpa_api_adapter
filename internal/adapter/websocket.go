@@ -246,7 +246,7 @@ func writeWSMessage(conn *websocket.Conn, kind int, data []byte) error {
 	return conn.WriteMessage(kind, data)
 }
 
-func (m *Manager) proxyWebSocket(w http.ResponseWriter, r *http.Request, cfg Config, api APIConfig, generation uint64, info callEntry) {
+func (m *Manager) proxyWebSocket(w http.ResponseWriter, r *http.Request, cfg Config, api APIConfig, suffix string, generation uint64, info callEntry) {
 	if !cfg.WebSocketEnabled {
 		writeError(w, &apiError{http.StatusForbidden, "WebSocket 已禁用，请在通用设置中启用或使用 HTTP/SSE"})
 		return
@@ -263,7 +263,7 @@ func (m *Manager) proxyWebSocket(w http.ResponseWriter, r *http.Request, cfg Con
 		writeError(w, &apiError{http.StatusBadRequest, "此接口需要 WebSocket 升级"})
 		return
 	}
-	u := targetURL(api, "/"+api.Format+r.URL.Path[len(api.Prefix)+len(api.Format)+1:], r.URL.RawQuery)
+	u := targetURL(api, "/"+api.Format+suffix, r.URL.RawQuery)
 	if u.Scheme == "https" {
 		u.Scheme = "wss"
 	} else {

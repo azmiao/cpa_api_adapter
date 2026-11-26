@@ -123,6 +123,8 @@ CPA 原始接口可以继续给持有独立 CPA Key 的其他客户端使用，�
 
 只选与你实际部署相符的一种。**CPA 内部地址仍指向 CPA 原有端口**；下面设置的是插件如何接受客户端或反代的连接。
 
+「通用设置 → 统一前缀」（配置项 `shared_prefix`）默认留空，原有接入地址不变。填写 `adapter`（只填字母、数字、下划线或连字符，不带 `/`）并保存后，所有 API 的地址变为 `/{统一前缀}{API 路由前缀}/{出口格式}`。例如 API 路由前缀为 `/omp`、出口格式为 `backend-api` 时，Base URL 为 `https://cpa.594594.xyz/adapter/omp/backend-api`。已有客户端需要改用新地址，插件不再接受原来的无统一前缀路径。
+
 ### A. CPA 直接运行在宿主机
 
 先用 TCP 跑通，最省事：
@@ -170,17 +172,17 @@ services:
 
 </details>
 
-2. 回到插件「通用设置」，选择 **Unix 套接字**；路径填写 `/run/cpa-api/adapter.sock`，权限保持 `0660`，点击「保存全部」。
+2. 回到插件「通用设置」，选择 **Unix 套接字**；路径填写 `/run/cpa-api/adapter.sock`，权限保持 `0660`。推荐将「统一前缀」填为 `adapter`，点击「保存全部」。
 
 ![Linux / Docker 的 Unix 设置填写示例，截图展示保存前的字段值](docs/images/12-settings-unix.png)
 
-3. 在当前 API 的「接入」页选择 Caddy 或 Nginx，点击「复制配置」。放入已有反代站点，保留原有 CPA 转发规则，检查配置后重载反代。
+3. 在任意 API 的「接入」页选择 Caddy 或 Nginx，点击「复制配置」。放入已有反代站点，保留原有 CPA 转发规则，检查配置后重载反代。设置统一前缀后，所有 API 共用一份规则，新增 API 不需要修改反代。
 
-   Nginx 片段中的 `upstream` 放在 `http {}` 内，同一套接字只添加一次；各 API 的 `location` 放在站点的 `server {}` 内。共享连接池使用 `keepalive 32`，普通 HTTP 请求不再强制关闭连接。WebSocket 默认禁用，片段不包含升级配置；启用时还需添加同样放在 `http {}` 内的共享 `map`，并更新各 API 的 `location`。
+   Caddy 使用 `handle` 匹配 `/adapter/*`；不要用 `handle_path`，插件需要收到完整路径。Nginx 的 `upstream` 放在 `http {}` 内，`location` 放在站点的 `server {}` 内；`proxy_pass` 不带尾部 `/`，以保留前缀。共享连接池使用 `keepalive 32`。WebSocket 默认禁用；启用后需更新 Nginx 配置，并将共享 `map` 放在 `http {}` 内。
 
 ![Unix 模式选择代理软件并复制生成的反代配置；图中为填写示例的预览](docs/images/13-unix-proxy-copy.png)
 
-相同 Base URL 的多个 Key **只需一份反代规则**；其他路径的 API 再增加对应规则。保存后在「通用设置」确认实际监听状态，目录挂载与权限正确后反代才能连接。
+如果留空统一前缀，相同 Base URL 的多个 Key 仍只需一份规则，不同路径的 API 各自配置。保存后在「通用设置」确认实际监听状态；目录挂载与权限正确后反代才能连接。
 
 ### C. CPA 在 Docker，反代在另一台服务器
 
@@ -209,6 +211,8 @@ services:
 
 3. **到远端反代服务器配置连接目标**：CPA 宿主机增加放行端口 18318
 
+下面的示例要求先在插件「通用设置」把「统一前缀」设为 `adapter` 并保存。若原来使用反代剥离 `/adapter`，改用统一前缀时须同时取消剥离。
+
 <details>
 <summary>反代服务器 Nginx 示例</summary>
 
@@ -230,8 +234,8 @@ server
   listen 443 ssl ;
   server_name cpa.xxxxx.com;               # 替换为自己的域名
 
-  location ^~ /adapter/ {                  # 替换为自己想要的代理前缀
-      proxy_pass http://cpa_adapter_remote/;
+  location ^~ /adapter/ {                  # 与插件的统一前缀一致
+      proxy_pass http://cpa_adapter_remote;
       proxy_http_version 1.1;
       proxy_set_header Upgrade $http_upgrade;
       proxy_set_header Connection $cpa_adapter_connection;
@@ -249,13 +253,13 @@ server
 }
 ```
 
-如此配置可让 `https://cpa.xxxxx.com` 访问CPA本体，让 `ttps://cpa.xxxxx.com/adapter` 访问插件转发的 api。
+如此配置可让 `https://cpa.xxxxx.com` 访问 CPA 本体，让 `https://cpa.xxxxx.com/adapter/` 下的请求转发到插件。
 
 </details>
 
 4. 防火墙只允许反代服务器访问CPA服务器所用到的插件端口 18318 。客户端使用反代的 HTTPS 域名，不使用容器监听地址。TCP 模式不提供一键反代配置，远端反代由你自行配置。
 
-5. 若按照上面示例配置后，假设插件增加了一个 v1 格式的 API，可用 `http://cpa.xxxxx.com/adapter/{路由前缀}/v1` 替代原有的 `http://cpa.xxxxx.com:18318/{路由前缀}/v1`
+5. 若按上面示例新增一个 `v1` 格式的 API，客户端可使用 `https://cpa.xxxxx.com/adapter/{路由前缀}/v1`（例如 `https://cpa.xxxxx.com/adapter/omp/v1`）。
 
 ## 4. 把地址交给客户端
 
@@ -278,7 +282,7 @@ Unix 预览地址按管理页面的 Origin 生成，配置好反代后才能使�
 
 ![为 oh-my-pi 新增 API，路由前缀为 /codex，出口格式选择 backend-api](docs/images/11-backend-api.png)
 
-3. 到「接入」复制地址；使用 Unix / 反代时，补齐该路径的反代规则。
+3. 到「接入」复制地址；使用反代且未设统一前缀时，补齐该路径的反代规则。
 4. 在 **客户端**的 `~/.omp/agent/models.yml` 合并以下内容。这里是 oh-my-pi 的文件，不是 CPA 配置：
 
 ```yaml

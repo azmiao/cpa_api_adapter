@@ -88,7 +88,7 @@ func boundedLogString(value string) string {
 	return strings.Clone(value)
 }
 
-func callInfo(r *http.Request, api APIConfig, generation uint64, index int, operation string) callEntry {
+func callInfo(r *http.Request, api APIConfig, sharedPrefix string, generation uint64, index int, suffix string) callEntry {
 	name := api.Name
 	if name == "" {
 		name = "API " + strconv.Itoa(index+1)
@@ -107,7 +107,13 @@ func callInfo(r *http.Request, api APIConfig, generation uint64, index int, oper
 			ip = host
 		}
 	}
-	return callEntry{APIID: strconv.FormatUint(generation, 10) + ":" + strconv.Itoa(index+1), APIName: boundedLogString(name), APIPath: boundedLogString(api.BasePath()), Operation: operation, Method: boundedLogString(r.Method), Transport: "http", IP: boundedLogString(ip), IPSource: source, Result: "running", Usage: emptyCallUsage()}
+	var apiPath string
+	if sharedPrefix == "" {
+		apiPath = api.BasePath()
+	} else {
+		apiPath = "/" + sharedPrefix + api.Prefix + "/" + api.Format
+	}
+	return callEntry{APIID: strconv.FormatUint(generation, 10) + ":" + strconv.Itoa(index+1), APIName: boundedLogString(name), APIPath: boundedLogString(apiPath), Operation: callOperation(api.Format, suffix), Method: boundedLogString(r.Method), Transport: "http", IP: boundedLogString(ip), IPSource: source, Result: "running", Usage: emptyCallUsage()}
 }
 
 func callOperation(format, suffix string) string {
